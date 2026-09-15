@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller build output
+build/Claude-Multi-Setup/
+build/Claude Multi Setup/
+build/claude-multi-setup/
+dist/
+*.spec
+
+# Release zips (attached to GitHub Releases instead)
+release/
+
+# Local tool settings
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db

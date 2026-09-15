@@ -1,0 +1,5 @@
+# Requirements for the setup wizard (runtime). Tkinter ships with Python on
+# Windows/macOS; Linux needs python3-tk (apt install python3-tk).
+# Packaging requires: pip install pyinstaller
+
+pyinstaller>=6.0
