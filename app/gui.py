@@ -126,6 +126,7 @@ class SetupWizard(tk.Tk):
             tk.Label(self._container, text="Install Claude Desktop first, then re-run this wizard.",
                      bg=PANEL, fg=MUTED).pack()
             return
+        self.existing_names = self.app.platform.detect_existing_instances()
         self._show_configure()
 
     # ------------------------------------------------------------- config -- #
@@ -133,6 +134,26 @@ class SetupWizard(tk.Tk):
     def _show_configure(self) -> None:
         self._clear()
         p = self.app.platform
+
+        # --- Claude update / repair banner ----------------------------------
+        if p.is_windows and self.installs:
+            try:
+                from .core.asar_patch import read_sidecar_version
+
+                base = p.root_install_dir()
+                patched = read_sidecar_version(base)
+                installed = p.installed_version(self.installs[0])
+                if patched and installed and patched != installed:
+                    warn = tk.Label(
+                        self._container,
+                        text=(f"Claude was updated: {patched} -> {installed}.\n"
+                              "Your existing instances still run the older build. "
+                              "Re-run Setup to re-patch them."),
+                        bg="#21170f", fg="#e0b98f", wraplength=620, justify="left",
+                        font=("Segoe UI", 9, "bold"))
+                    warn.pack(fill="x", pady=(0, 8))
+            except Exception:
+                pass
 
         tk.Label(self._container, text=f"{p.os.title()} detected",
                  bg=PANEL, fg=TEXT, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(4, 2))
@@ -143,6 +164,16 @@ class SetupWizard(tk.Tk):
             tk.Label(row, text=inst.exe_path or inst.app_dir, bg=PANEL, fg=MUTED,
                      wraplength=520, justify="left").pack(side="left", padx=10)
 
+        # --- existing instances hint ------------------------------------------
+        existing = getattr(self, "existing_names", [])
+        if existing:
+            hint = tk.Frame(self._container, bg=PANEL)
+            hint.pack(fill="x", pady=(6, 0))
+            tk.Label(hint, text="Found existing instances:", bg=PANEL, fg=GOOD,
+                     font=("Segoe UI", 9, "bold")).pack(side="left")
+            tk.Label(hint, text=", ".join(existing), bg=PANEL, fg=TEXT,
+                     font=("Segoe UI", 9)).pack(side="left", padx=8)
+
         tk.Label(self._container, text="", bg=PANEL).pack()
         tk.Label(self._container, text="How many instances do you want (besides the original) ?",
                  bg=PANEL, fg=TEXT, font=("Segoe UI", 11)).pack(anchor="w", pady=(10, 2))
@@ -150,7 +181,7 @@ class SetupWizard(tk.Tk):
                  text="Original Claude stays on its default profile. Each extra one gets an isolated profile.",
                  bg=PANEL, fg=MUTED).pack(anchor="w")
 
-        self.count_var = tk.IntVar(value=2)
+        self.count_var = tk.IntVar(value=max(1, len(getattr(self, "existing_names", []))))
         counter = tk.Frame(self._container, bg=PANEL)
         counter.pack(anchor="w", pady=8)
         ttk.Button(counter, text="−", style="Ghost.TButton", width=3,
@@ -176,7 +207,9 @@ class SetupWizard(tk.Tk):
         for w in self.name_frame.winfo_children():
             w.destroy()
         self.name_entries.clear()
-        defaults = ["Company", "Personal", "Work", "School", "Side"]
+        existing = list(getattr(self, "existing_names", []))
+        # neutral defaults: reuse existing instance names first, then numbered "Instance 2/3/.."
+        defaults = existing + ["Instance 2", "Instance 3", "Instance 4", "Instance 5", "Instance 6"]
         n = self.count_var.get()
         for i in range(n):
             row = tk.Frame(self.name_frame, bg=PANEL)
@@ -187,7 +220,7 @@ class SetupWizard(tk.Tk):
                            font=("Segoe UI", 10), highlightthickness=1,
                            highlightbackground=BORDER, highlightcolor=ACCENT)
             ent.pack(side="left", fill="x", expand=True, ipady=4)
-            ent.insert(0, defaults[i % len(defaults)])
+            ent.insert(0, defaults[i % len(defaults)] if defaults else f"Instance {i + 1}")
             self.name_entries.append(ent)
 
     # --------------------------------------------------------------- review -- #
@@ -289,7 +322,9 @@ class SetupWizard(tk.Tk):
         self._busy = False
         if ok:
             messagebox.showinfo("Done", "Setup complete.\n\n"
-                                "Open each shortcut and sign in. Each instance keeps its own profile.")
+                                "Open each shortcut and sign in. Each instance keeps its own profile.\n"
+                                "If Claude updates later and a copy stops working, re-run this wizard "
+                                "to re-patch it.")
         else:
             messagebox.showerror("Setup failed", "See the log above for details.")
         self._show_scan()

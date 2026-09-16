@@ -9,7 +9,8 @@ python3 -m pip install --quiet --upgrade pyinstaller
 python3 -m PyInstaller \
   --noconfirm --clean --onefile \
   --name "claude-multi-setup" \
-  --collect-submodules app \
-  app/main.py
+  --paths . \
+  --icon icon.png \
+  run.py
 
 echo "Done -> $(pwd)/dist/claude-multi-setup"

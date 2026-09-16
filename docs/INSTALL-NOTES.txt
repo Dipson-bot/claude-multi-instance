@@ -1,16 +1,19 @@
 ==========================================================
-  Claude Multi-Instance Setup
-  Run multiple Claude Desktop profiles on one machine
+Claude Multi-Instance Setup  v1.1
+      Run multiple Claude Desktop profiles on one machine
 ==========================================================
 
 QUICK START
 -----------
 1. Double-click  Claude-Multi-Setup.exe
-2. Pick how many instances you want (e.g. 2: "Work", "Personal")
+2. Pick how many instances you want (e.g. "Instance 2", "Work")
 3. Click  Install
 4. Open each new desktop shortcut and sign in separately
    - each profile is fully isolated (accounts, files, settings)
 5. Done — all instances run simultaneously
+
+TIP: If you already set up instances before, the wizard detects them,
+pre-fills the list, and refreshes them without touching your profiles.
 
 REQUIREMENTS
 ------------
@@ -39,13 +42,15 @@ macOS / Linux:
 CLI MODE (no GUI)
 -----------------
   Claude-Multi-Setup.exe --cli Work,Personal,School
+  Claude-Multi-Setup.exe --cli --repair          (re-patch existing after update)
 
 REINSTALL AFTER A CLAUDE UPDATE
 -------------------------------
 When Anthropic releases a new Claude Desktop version the Store/MSIX app
 will be updated automatically.  The patched copy will no longer match the
-new code.  Re-run the wizard — it will detect the new version and
-re-patch.  Your profiles and launchers are preserved.
+new code.  Re-run the wizard (or run  --cli --repair  headless) — it
+detects the new version and re-patches.  Your profiles and launchers are
+preserved.
 
 TROUBLESHOOTING
 ---------------
@@ -57,6 +62,10 @@ A: Make sure you're clicking the shortcuts created by the wizard
 
 Q: "Access is denied" during patch
 A: Close all Claude windows first, then re-run.
+
+Q: Patch says "Could not locate the relocation code"
+A: Claude renamed its bundled patch target (DW/Cl -> FJ across versions).
+   v1.1 of this wizard recognises all known layouts (Claude <=1.5x and 2.x).
 
 Q: Exit code -36861 when launching
 A: The integrity fuse is still active on the copied exe.

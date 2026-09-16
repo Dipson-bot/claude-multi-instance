@@ -29,6 +29,24 @@ _UNPACK_GLOB = r"{*.node,*.exe,*.dll}"
 # Files that must remain unpacked inside app.asar.unpacked/
 _NATIVE_SUFFIXES = (".node", ".exe", ".dll", ".pak")
 
+_SIDECAR_FILENAME = "claude-setup-version.txt"
+
+
+def sidecar_path(dest_root: str) -> str:
+    """Where the patched copy remembers which Claude version it was built from."""
+    return os.path.join(dest_root, _SIDECAR_FILENAME)
+
+
+def read_sidecar_version(dest_root: str) -> str | None:
+    """Return the version of the Claude build a patched copy was created from."""
+    p = sidecar_path(dest_root)
+    if os.path.isfile(p):
+        try:
+            return open(p, encoding="utf-8").read().strip() or None
+        except Exception:
+            return None
+    return None
+
 
 @dataclass
 class PatchResult:
@@ -80,6 +98,7 @@ class AsarPatcher:
         source: ClaudeInstall,
         dest_root: str,
         app_name: str = "app",
+        source_version: str | None = None,
     ) -> PatchResult:
         """Create a patched copy of a Claude install under dest_root/app.
 
@@ -168,6 +187,8 @@ class AsarPatcher:
             if not self._verify_patch(app_dir):
                 return PatchResult(False, "Post-patch verification failed.")
 
+            self._write_version_sidecar(source_version, dest_root)
+
             return PatchResult(True, "Patched copy ready.", detail=app_dir)
 
         except Exception as exc:  # noqa: BLE001
@@ -175,17 +196,121 @@ class AsarPatcher:
 
     # ---- bundle patching ---- #
 
+    @staticmethod
+    def _replace_function_body(data: str, name: str) -> tuple[str, bool]:
+        """Brace-aware replace of `function NAME(){...}` bodies that reference
+        CLAUDE_USER_DATA_DIR (the 3P relocation fallback).
+
+        Only rewrites occurrences whose body actually contains the relocation
+        marker, so unrelated minified helpers (e.g. a sentry logger also named
+        `Cl`) are left untouched. Iterates every occurrence, not just the first.
+        """
+        needle = f"function {name}("
+        changed = False
+        search_from = 0
+
+        while True:
+            start = data.find(needle, search_from)
+            if start < 0:
+                break
+            # move to the opening brace of the parameter list
+            paren = data.find("{", start)
+            if paren < 0:
+                break
+            # find the function's closing brace (frequency-aware)
+            close, body = AsarPatcher._find_function_end(data, paren)
+            if close is None:
+                break
+            if "CLAUDE_USER_DATA_DIR" in body:
+                # detect the electron alias used in this bundle
+                m = re.search(r"([A-Za-z_$][\w$]*)\.app\.getPath", body)
+                alias = m.group(1) if m else "T"
+                new_fn = f"function {name}(){{return {alias}.app.getPath(\"userData\")}}"
+                data = data[:start] + new_fn + data[close + 1:]
+                changed = True
+            # advance past this occurrence
+            search_from = start + len(needle)
+
+        return data, changed
+
+    @staticmethod
+    def _find_function_end(data: str, open_brace: int) -> tuple[int | None, str]:
+        """Return (closing_brace_index, body_text) for the function whose body
+        opens at open_brace. Understands strings, escapes, and template
+        literals including ${...} expressions."""
+        depth = 0          # function brace depth (real code braces only)
+        tmpl_expr = 0      # depth inside ${...} of a template literal
+        in_str: str | None = None
+        in_tmpl = False
+        i = open_brace
+        while i < len(data):
+            ch = data[i]
+            if in_str:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+                i += 1
+                continue
+            if in_tmpl:
+                if tmpl_expr > 0:
+                    # inside ${ ... } — a JS expression context; braces here are
+                    # real braces but must not close the FUNCTION, only the expr
+                    if ch in "'\"`":
+                        in_str = ch if ch != "`" else None
+                        if ch == "`":
+                            in_tmpl = True
+                        i += 1
+                        continue
+                    if ch == "{":
+                        tmpl_expr += 1
+                    elif ch == "}":
+                        tmpl_expr -= 1
+                    i += 1
+                    continue
+                # template literal text
+                if ch == "`":
+                    in_tmpl = False
+                elif ch == "$" and i + 1 < len(data) and data[i + 1] == "{":
+                    tmpl_expr = 1
+                    i += 2
+                    continue
+                i += 1
+                continue
+            if ch in "'\"`":
+                in_str = ch if ch != "`" else None
+                if ch == "`":
+                    in_tmpl = True
+                    tmpl_expr = 0
+                i += 1
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i, data[open_brace:i + 1]
+            i += 1
+        return None, ""
+
     def _patch_bundles(self, extract_dir: str) -> bool:
-        """Replace the bodies of DW() and Cl() so relocation to Claude-3p never runs."""
+        """Neutralize the 3P userData relocation so --user-data-dir is honored.
+
+        Handles both known bundle layouts:
+          - Claude <=1.5x:  function DW()/function Cl()
+          - Claude 2.x:     function FJ() (same behavior, new name)
+        Also strips the "delete process.env.CLAUDE_USER_DATA_DIR" guard so the
+        env var survives; that is the deeper root cause of forced relocation.
+        """
         build_dir = os.path.join(extract_dir, ".vite", "build")
         if not os.path.isdir(build_dir):
             return False
 
         hits = 0
-        funcs = {
-            "DW": r"function DW\(\)\{[^}]*(?:return[a-zA-Z$]{1,3}\(\s*\)[^}]*)?\}",  # placeholder
-            "Cl": r"function Cl\(\)\{[^}]*\}",
-        }
+        targets = ["DW", "Cl", "FJ"]
+        delete_old = "delete process.env.CLAUDE_USER_DATA_DIR,"
+        delete_new = "delete process.env.CLAUDE_USER_DATA_DIR"
 
         for fname in os.listdir(build_dir):
             fpath = os.path.join(build_dir, fname)
@@ -196,26 +321,23 @@ class AsarPatcher:
             except Exception:
                 continue
             orig = data
-            if "function DW(){" in data:
-                # Replace whole function with a body that returns the real userData.
-                data = re.sub(
-                    r"function DW\(\)\{[^}]*\}",
-                    'function DW(){return app.getPath("userData")}',
-                    data,
-                    count=1,
-                )
-            if "function Cl(){" in data:
-                data = re.sub(
-                    r"function Cl\(\)\{[^}]*\}",
-                    'function Cl(){return app.getPath("userData")}',
-                    data,
-                    count=1,
-                )
+
+            # 1. neutralize env-var deletion (pre.js) — root cause
+            data = data.replace(delete_old, "")
+            data = data.replace(delete_new, "process.env.CLAUDE_USER_DATA_DIR_IGNORED")
+            if data != orig:
+                hits += 1
+
+            # 2. neutralize the relocation fallback function(s)
+            for name in targets:
+                data, changed = self._replace_function_body(data, name)
+                if changed:
+                    hits += 1
+
             if data != orig:
                 with open(fpath, "w", encoding="utf-8") as fh:
                     fh.write(data)
                 self.log(f"  patched {fname}")
-                hits += 1
 
         return hits > 0
 
@@ -249,3 +371,12 @@ class AsarPatcher:
             return False
         self.log("  verification OK: asar + unpacked native files present")
         return True
+
+    @staticmethod
+    def _write_version_sidecar(version: str | None, dest_root: str) -> None:
+        """Persist the Claude version that produced this patched copy."""
+        try:
+            with open(sidecar_path(dest_root), "w", encoding="utf-8") as fh:
+                fh.write(version or "unknown")
+        except Exception:
+            pass

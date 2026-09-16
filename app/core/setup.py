@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .platform import Platform, ClaudeInstall
-from .asar_patch import AsarPatcher
+from .asar_patch import AsarPatcher, read_sidecar_version
 from .launcher import LauncherBuilder, Instance
 
 LogFn = Callable[[str], None]
@@ -34,6 +34,8 @@ class SetupResult:
     installs: list[ClaudeInstall] = field(default_factory=list)
     instances: list[Instance] = field(default_factory=list)
     copy_app_dir: str | None = None
+    installed_version: str | None = None
+    patched_version: str | None = None
 
 
 class ClaudeSetup:
@@ -69,14 +71,31 @@ class ClaudeSetup:
             os.makedirs(base, exist_ok=True)
             copy_exe = installs[0].exe_path
             copied_app_dir = None
+            installed_version = p.installed_version(installs[0])
+
+            res.installs = installs
+            res.installed_version = installed_version
+            res.patched_version = read_sidecar_version(base)
 
             if cfg.patch_copy and installs[0].kind in ("msix", "standard"):
+                # --- repair detection: did Claude update since last patch? ---
+                if res.patched_version and installed_version and res.patched_version != installed_version:
+                    self.log(
+                        f"  NOTE: Claude was updated from {res.patched_version} to "
+                        f"{installed_version} since the last setup. Re-patching now."
+                    )
+                elif res.patched_version and not installed_version:
+                    self.log(f"  NOTE: previous setup tracked version {res.patched_version} (installed version unknown).")
+
                 self.log("Patching a dedicated copy (integrity fuse + asar relocation fix)...")
-                copy_result = self.patcher.patch_copy(installs[0], base)
+                copy_result = self.patcher.patch_copy(
+                    installs[0], base, source_version=installed_version
+                )
                 if copy_result.ok:
                     copied_app_dir = copy_result.detail
                     copy_exe = os.path.join(copy_result.detail, "Claude.exe")
                     res.copy_app_dir = copied_app_dir
+                    res.patched_version = installed_version
                 else:
                     # try fallback: use an existing patched copy if present
                     fallback = os.path.join(base, "app", "Claude.exe")
@@ -90,6 +109,7 @@ class ClaudeSetup:
                         return res
 
             instances = self._build_instances(cfg)
+            self._merge_existing(base, instances, res)
             desktop = os.path.join(os.environ.get("USERPROFILE", p.home), "Desktop")
             self.launcher.build_windows(instances, copy_exe, base, desktop)
             res.instances = instances
@@ -137,3 +157,20 @@ class ClaudeSetup:
         for inst in res.instances:
             os.makedirs(inst.profile_dir, exist_ok=True)
             self.log(f"  profile ready: {inst.profile_dir}")
+
+    def _merge_existing(self, base: str, instances: list[Instance], res: SetupResult) -> None:
+        """Merge instance profile dirs that already exist into the fresh list.
+
+        Re-running the wizard (e.g. after a Claude update) should re-generate
+        launchers/shortcuts for instances that already have a profile instead of
+        overwriting or skipping them.
+        """
+        existing = [i for i in instances if os.path.isdir(i.profile_dir)]
+        if not existing:
+            return
+        self.log(
+            f"  NOTE: {len(existing)} existing profile(s) detected — "
+            "launchers will be refreshed, profiles preserved."
+        )
+        for inst in existing:
+            self.log(f"    keep profile: {inst.profile_dir}")

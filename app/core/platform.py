@@ -98,14 +98,17 @@ class Platform:
                     "-NoProfile",
                     "-Command",
                     "Get-AppxPackage -Name 'Claude' | Sort-Object Version -Descending | "
-                    "Select-Object -First 1 | Select-Object -ExpandProperty InstallLocation",
+                    "Select-Object -First 1 | Select-Object InstallLocation,Version | ConvertTo-Json",
                 ],
                 capture_output=True,
                 text=True,
                 timeout=60,
                 creationflags=self._hide_window(),
             )
-            loc = result.stdout.strip()
+            data = json.loads(result.stdout.strip() or "{}")
+            loc = data.get("InstallLocation", "") if isinstance(data, dict) else ""
+            if not loc and isinstance(data, dict):
+                loc = ""
             if loc:
                 exe = os.path.join(loc, "app", "Claude.exe")
                 if os.path.isfile(exe):
@@ -115,6 +118,7 @@ class Platform:
                             exe_path=exe,
                             app_dir=os.path.dirname(exe),
                             resources_dir=os.path.join(os.path.dirname(exe), "resources"),
+                            version=data.get("Version") if isinstance(data, dict) else None,
                         )
                     )
         except Exception:
@@ -137,6 +141,41 @@ class Platform:
                 )
         return out
 
+    def installed_version(self, inst: ClaudeInstall) -> str | None:
+        """Best-effort full version string for an install.
+
+        MSIX carries it in the package; standalone/copy installs carry it in the
+        asar copy or the app bundle. Falls back to reading package.json from the
+        asar (works when @electron/asar is available).
+        """
+        if inst.version:
+            return inst.version
+        # macOS: Info.plist
+        if self.is_macos and inst.app_dir:
+            plist = inst.app_dir.replace("Contents/MacOS/Claude", "Contents/Info.plist")
+            if plist.endswith("Info.plist") and os.path.isfile(plist):
+                try:
+                    import plistlib
+
+                    with open(plist, "rb") as fh:
+                        info = plistlib.load(fh)
+                    ver = info.get("CFBundleShortVersionString") or info.get("CFBundleVersion")
+                    if ver:
+                        return str(ver)
+                except Exception:
+                    pass
+        # generic: read resources.pak-named version marker from asar is heavy;
+        # instead read version from a sidecar we wrote at patch time
+        if inst.resources_dir:
+            sidecar = os.path.join(inst.resources_dir, "..", "..", "claude-setup-version.txt")
+            sidecar = os.path.abspath(sidecar)
+            if os.path.isfile(sidecar):
+                try:
+                    return open(sidecar, encoding="utf-8").read().strip() or None
+                except Exception:
+                    return None
+        return None
+
     def _find_macos(self) -> list[ClaudeInstall]:
         out: list[ClaudeInstall] = []
         for path in [
@@ -154,20 +193,37 @@ class Platform:
                     )
         return out
 
-    def _find_linux(self) -> list[ClaudeInstall]:
-        out: list[ClaudeInstall] = []
-        for name in ["claude", "Claude"]:
-            exe = shutil.which(name)
-            if exe:
-                app_dir = os.path.dirname(exe)
-                out.append(
-                    ClaudeInstall(
-                        kind="standard", exe_path=exe, app_dir=app_dir, resources_dir=None
-                    )
-                )
-        return out
-
     # ---- misc helpers ---- #
+
+    def detect_existing_instances(self) -> list[str]:
+        """Return the names of instances already set up by this wizard.
+
+        Scans launchers on disk (the same files we create). Used to prefill the
+        wizard after a Claude update so the user can simply re-run to repair.
+        """
+        names: list[str] = []
+        root = self.root_install_dir()
+        if not os.path.isdir(root):
+            return names
+
+        if self.is_windows:
+            import glob
+
+            for vbs in glob.glob(os.path.join(root, "Claude-*.vbs")):
+                base = os.path.basename(vbs)
+                if base.lower().startswith("claude-") and base.lower().endswith(".vbs"):
+                    names.append(base[len("Claude-"):-len(".vbs")])
+        elif self.is_macos:
+            desktop = os.path.join(self.home, "Desktop")
+            for fn in sorted(os.listdir(desktop)) if os.path.isdir(desktop) else []:
+                if fn.startswith("Claude-") and fn.endswith(".command"):
+                    names.append(fn[len("Claude-"):-len(".command")])
+        elif self.is_linux:
+            desktop = os.path.join(self.home, "Desktop")
+            for fn in sorted(os.listdir(desktop)) if os.path.isdir(desktop) else []:
+                if fn.startswith("Claude-") and fn.endswith(".sh"):
+                    names.append(fn[len("Claude-"):-len(".sh")])
+        return [n for n in names if n]
 
     @staticmethod
     def _hide_window() -> int:
@@ -183,9 +239,15 @@ class Platform:
         return True, exe
 
     def root_install_dir(self) -> str:
-        """Default base folder to place the patched install cluster."""
+        """Default base folder to place the patched install cluster.
+
+        Prefers an existing cluster under the user home (`~/ClaudeInstances`),
+        which is what setups created so far use, falling back to a system-local
+        default when no cluster exists yet.
+        """
+        home_cluster = os.path.join(self.home, "ClaudeInstances")
+        if os.path.isdir(home_cluster):
+            return home_cluster
         if self.is_windows:
             return os.path.join(os.environ.get("LOCALAPPDATA", self.home), "ClaudeInstances")
-        if self.is_macos:
-            return os.path.join(self.home, "ClaudeInstances")
-        return os.path.join(self.home, "ClaudeInstances")
+        return home_cluster
