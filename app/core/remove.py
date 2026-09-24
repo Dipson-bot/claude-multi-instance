@@ -22,7 +22,7 @@ from typing import Callable
 
 from . import startup, update_check
 from .asar_patch import _SIDECAR_FILENAME, _norm, claude_processes_under
-from .launcher import Instance
+from .launcher import Instance, mac_app_path
 from .platform import _RESERVED, MANIFEST_FILENAME, Platform, safe_name
 
 LogFn = Callable[[str], None]
@@ -69,7 +69,7 @@ def known_instances(p: Platform | None = None) -> list[KnownInstance]:
     for name in p.detect_existing_instances():
         out.setdefault(name.lower(), KnownInstance(name, p.profile_dir(safe_name(name))))
     for inst in out.values():
-        inst.files = sorted({f for f in inst.files + _instance_files(p, base, inst.name) if os.path.exists(f)})
+        inst.files = sorted({f for f in inst.files + _instance_files(p, base, inst.name) if os.path.lexists(f)})
     return list(out.values())
 
 
@@ -81,7 +81,9 @@ def _instance_files(p: Platform, base: str, name: str) -> list[str]:
         os.path.join(base, f"Claude-{name}.vbs"),  # older versions
         os.path.join(base, f"Claude-{name}.ico"),  # older versions
         os.path.join(desktop, f"Claude ({name}).lnk"),
-        os.path.join(desktop, f"Claude-{name}.command"),
+        os.path.join(desktop, f"Claude-{name}.command"),  # older versions
+        os.path.join(desktop, f"Claude {name}"),  # macOS: Desktop shortcut to the app
+        mac_app_path(p.home, name),  # macOS: ~/Applications/Claude <name>.app
         os.path.join(desktop, f"Claude-{name}.sh"),
         os.path.join(p.home, ".local", "share", "applications", f"Claude-{name}.desktop"),
     ]
@@ -187,7 +189,10 @@ def remove_instances(names: list[str], delete_data: bool = False, uninstall: boo
         log(f"Removing {inst.name}...")
         for f in inst.files:
             try:
-                os.remove(f)
+                if os.path.isdir(f) and not os.path.islink(f):
+                    shutil.rmtree(f)  # macOS launcher app
+                else:
+                    os.remove(f)
                 log(f"  deleted {f}")
             except FileNotFoundError:
                 pass

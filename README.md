@@ -1,172 +1,174 @@
-# Claude Multi-Instance Setup
+# Claude Multi-Instance
 
-A cross-platform wizard that turns a single Claude Desktop install into several
-**isolated side-by-side instances**, each with its own account, profile and
-**colored icon** so you always open the right one.
+Run **several Claude Desktop accounts side by side** on one computer. Each
+instance has its own profile (sign-in, chats, settings), its own **colored
+icon**, and its own name, so you always open the right one.
 
-- **Windows** — patches a copy (asar relocation kill + integrity fuse off) so any
-  number of named instances share one binary with distinct `--user-data-dir`
-  profiles. One `.lnk` shortcut per instance (desktop + install folder). Each
-  instance gets its own icon color/badge, window title (`Claude — Work`) and
-  taskbar button. No Node.js needed.
-- **macOS / Linux** — no patching needed; generates `.command` / shell launchers
-  plus desktop entries that pass a dedicated `--user-data-dir` per instance,
-  with the instance's colored icon.
-- **Update-aware** — the wizard remembers which Claude version the copy was built
-  from. On Windows it checks at sign-in and offers to update the instances when
-  Claude has been updated; profiles (chats, sign-ins) are always kept.
+![Setup window](docs/screenshots/setup.png)
+
+> [!IMPORTANT]
+> This is an independent community tool. It is **not affiliated with, endorsed
+> by, or supported by Anthropic**. On Windows it runs your extra instances from
+> a **modified copy** of Claude Desktop (your original install is never
+> changed). Anthropic does not support modified copies, so updates to Claude
+> may break it until this tool is updated. Use it at your own risk, and check
+> your organization's policies before using it on a managed computer.
+
+## Download
+
+Get the latest version from **[Releases](https://github.com/Dipson-bot/claude-multi-instance/releases/latest)**:
+
+| System | File | How to start |
+|---|---|---|
+| Windows 10/11 | `Claude-Multi-Setup-v1.3-Windows.zip` | Unzip, double-click `Claude-Multi-Setup.exe` |
+| macOS | `Claude-Multi-Setup-v1.3-macOS.zip` | Unzip, run `bash start-mac.sh` in Terminal ([guide](MAC-QUICKSTART.md)) |
+
+Windows may say *"Windows protected your PC"* because the exe is not code-signed
+yet: click **More info → Run anyway**.
+
+## Features
+
+- **Any number of isolated instances**, each with its own sign-in, chats and settings.
+- **Colored icons with a badge** (e.g. a blue **W** for "Work"), with a palette or custom color, and a live preview.
+  - Windows: on the desktop shortcut, the taskbar button and the window.
+  - macOS: on the instance's app (Spotlight, Launchpad, Dock).
+- **Instance name in the window title** (Windows): `Claude — Work`.
+- **Separate taskbar buttons** per instance (Windows).
+- **Open by name on macOS**: each instance is its own app (`Claude Work.app`), found with Spotlight.
+- **Start at sign-in**, per instance or all at once; shows up in Task Manager → Startup apps.
+- **Update reminder** (Windows): after Claude updates, you're asked at sign-in whether to update your instances.
+- **Remove instances or uninstall everything**, with optional data deletion to the Recycle Bin/Trash so it can be restored.
+- **Safe updates**: the new copy is self-tested before it replaces the old one, and a failed update leaves the working copy untouched.
+- **No Node.js or admin rights needed.**
+
+![Instance icons](docs/screenshots/icons.png)
 
 ## Quick start
 
-### Grab the prebuilt package
-On Windows: `dist\Claude-Multi-Setup.exe` (built via PyInstaller onefile).
-On macOS/Linux: build your own with the scripts below.
+### Windows
+1. Install Claude Desktop from the Microsoft Store and close it.
+2. Run `Claude-Multi-Setup.exe`.
+3. Choose how many extra instances you want, and set their names, colors and badges. Tick **Start at sign-in** if you like.
+4. Click **Continue → Install**. It takes about a minute; a Claude window may appear briefly during the self-test.
+5. Open each colored **desktop shortcut** and sign in with a different account.
 
-### Build from source
-```bash
-pip install -r requirements.txt
-# Windows
-powershell -ExecutionPolicy Bypass -File build\build_windows.ps1
-# macOS
-bash build/build_macos.sh
-# Linux
-bash build/build_linux.sh
-```
-Output lands in `dist/`.
+### macOS
+See **[MAC-QUICKSTART.md](MAC-QUICKSTART.md)**. In short: install Python from
+python.org, unzip, then run `bash start-mac.sh`. Each instance appears as its own
+app in `~/Applications` (e.g. **Claude Work**), which you can open with Spotlight.
 
-### Run
-```bash
-Claude-Multi-Setup.exe                      # GUI wizard (default)
-Claude-Multi-Setup.exe --cli Work,Personal  # headless, default colors
-Claude-Multi-Setup.exe --cli --repair       # re-patch existing instances after an update
-Claude-Multi-Setup.exe --repair             # same, detects existing instances
-Claude-Multi-Setup.exe --no-update-check    # (with --cli/--repair) turn off the sign-in check
-```
+## How it works
 
-## How the wizard works
+Claude Desktop is an Electron app. Two instances can run together only if each
+uses its own *user data directory*.
 
-1. **Detect** OS + Claude Desktop install.
-2. **Detect** any instances already set up — names, colors and badges are
-   pre-filled and kept.
-3. **Ask** how many instances, their names, and for each an **icon color**
-   (palette or custom) and a **badge** of up to 2 letters (defaults to the
-   name's initials), with a live preview. Names are validated: no characters
-   that are invalid in folder names, no reserved Windows names, no names that
-   would collide with each other or with Claude's own `Claude-3p` folder.
-   The **original** Claude never gets touched; every extra instance gets its own
-   profile under `Claude-<name>`.
-4. **Windows only** — build a patched copy in a staging folder (`app.new`), in
-   pure Python:
-   - the userData relocation functions are found by their code shape (their
-     minified names change every build) and made to return
-     `app.getPath("userData")`;
-   - the `delete process.env.CLAUDE_USER_DATA_DIR` guard is neutralized;
-   - a launch shim sets `CLAUDE_USER_DATA_DIR` from `--user-data-dir` (so a
-     plain shortcut is enough) and applies the instance's window title, window
-     icon and taskbar identity (`--claude-instance`, `--claude-instance-icon`);
-   - if Node.js happens to be installed, modified files are syntax-checked;
-   - the changed files are written back into `app.asar` (the rest of the
-     archive is copied byte-for-byte) and `EnableEmbeddedAsarIntegrityValidation`
-     is switched off in the copied exe.
-5. **Self-test** (Windows) — launch the staged copy on a throwaway profile and
-   confirm it writes there and stays there. Only then is it swapped into place;
-   if anything fails, the previous copy is left untouched.
-6. **Create** one icon + launcher + shortcut per instance and record them in
-   `instances.json`. Windows: optionally register the sign-in update check.
+- **Windows.** The Store build forces its data folder back to `Claude-3p`, so a
+  plain `--user-data-dir` doesn't work. The tool builds **one patched copy** in
+  `%USERPROFILE%\ClaudeInstances\app` (pure Python, no Node.js):
+  - it disables that relocation and keeps `CLAUDE_USER_DATA_DIR`;
+  - it adds a small launch shim, which applies the instance's window title, icon and taskbar identity;
+  - it switches off the copy's asar-integrity fuse.
+  The copy is **self-tested** on a throwaway profile before it's installed.
+  Every instance runs from this copy with its own `--user-data-dir`.
+- **macOS.** No patching is needed. Each instance is a tiny launcher app that
+  runs `open -na Claude --args --user-data-dir=…`. A running instance shows
+  Claude's normal Dock icon.
+
+Profiles live in `%LOCALAPPDATA%\Claude-<Name>` (Windows) or
+`~/Library/Application Support/Claude-<Name>` (macOS).
 
 ## After a Claude update
 
-Claude Desktop auto-updates itself, but the extra instances run from the
-patched copy, which stays on the version it was built from until you update it.
-The instances keep working in the meantime.
+- **Windows:** the Store updates the original Claude. The instances keep
+  running the version they were built from until you update them. With the
+  reminder on, you're asked after your next sign-in; otherwise re-run the tool
+  and click Install. Close the extra instances first. Profiles are kept.
+- **macOS:** nothing to do. The instances use the updated Claude automatically.
 
-- **Windows, automatic:** if the sign-in check is on (default), a dialog appears
-  after the next sign-in: "Claude Desktop was updated… Update them now?" Yes opens
-  the wizard with everything pre-filled; No is remembered for that version. The
-  check is registered under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-  (no admin rights) and the tool copies itself to `%USERPROFILE%\ClaudeInstances`
-  so the check keeps working if the download is deleted.
-- **Manual:** re-run `Claude-Multi-Setup.exe` (a banner shows the version
-  change) or run `Claude-Multi-Setup.exe --cli --repair`.
-- Close every extra Claude instance first (the wizard refuses to repair while
-  one is running from the patched copy; the original Claude can stay open).
-- Profiles (`Claude-<name>`) are never deleted by the wizard — re-patching only
-  refreshes the shared app copy, icons and launchers.
+## Start at sign-in
 
-## Starting instances at sign-in
-
-Each instance can open automatically when you sign in:
-
-- in the wizard, tick **Start at sign-in** per instance (the header checkbox
-  turns it on/off for all), then Install; or
-- click **Startup…** for a quick screen with per-instance toggles plus
-  **Enable all / Disable all** — it applies immediately, no re-install.
-
-Windows uses a shortcut in your Startup folder, so the entries also show in
-Task Manager → Startup apps (turning one off there is respected; turning it
-back on in the tool clears the Task Manager switch). macOS uses a LaunchAgent
-per instance, Linux an XDG autostart entry. Removing an instance also removes
-its startup entry.
-
-```bash
-Claude-Multi-Setup.exe --startup-on "Work,Personal"
-Claude-Multi-Setup.exe --startup-off all
-Claude-Multi-Setup.exe --list                                # shows who starts at sign-in
-```
-
-Re-running Install is quick when Claude has not changed: the patched copy is
-only rebuilt when the installed Claude version differs (or with `--repair`).
+Tick **Start at sign-in** per instance in the setup window (the column header
+toggles all), or click **Startup…** to change it for existing instances instantly.
+Windows uses your Startup folder (visible in Task Manager → Startup apps);
+macOS uses a login item per instance.
 
 ## Removing instances
 
-In the wizard click **Remove instances…**, tick the instances, and choose:
+Click **Remove instances…**, tick the instances, and choose:
+- **Default:** removes the shortcuts/apps, launchers and icons. The profile is kept, so re-adding an instance with the same name restores its sign-in.
+- **Also delete their data:** the profile goes to the **Recycle Bin / Trash**.
+- **Full uninstall** (all instances ticked): also removes the patched copy and the update reminder.
 
-- *(default)* remove the shortcuts, launchers and icons only — the profile
-  folder is kept, so re-adding an instance with the same name brings its
-  sign-in back;
-- **Also delete their data** — the profile folder (sign-ins, local chat cache,
-  settings) is moved to the Recycle Bin / Trash, so it can still be restored;
-- **Full uninstall** (all instances ticked) — also removes the shared Claude
-  copy, the tool's folder and the sign-in update check.
+Your original Claude and your claude.ai accounts are never touched.
 
-Instances that are open must be closed first. The original Claude, its profiles
-(`Claude`, `Claude-3p`) and your claude.ai accounts are never touched. Taskbar
-pins have to be unpinned by hand (right-click → Unpin).
+## Command line
+
+```text
+Claude-Multi-Setup.exe                          setup window (default)
+Claude-Multi-Setup.exe --cli "Work,Personal"    set up without a window
+Claude-Multi-Setup.exe --repair                 rebuild the patched copy for existing instances
+Claude-Multi-Setup.exe --list                   list instances and who starts at sign-in
+Claude-Multi-Setup.exe --startup-on "Work"      start at sign-in ("all" for every instance)
+Claude-Multi-Setup.exe --startup-off all
+Claude-Multi-Setup.exe --remove "Work"          remove (add --delete-data to also trash its profile)
+Claude-Multi-Setup.exe --uninstall              remove everything
+Claude-Multi-Setup.exe --no-update-check        (with --cli/--repair) no sign-in update reminder
+```
+On macOS use `bash start-mac.sh <options>`. The Windows exe is a windowed app, so
+it prints nothing in a terminal; run from source (`python run.py …`) to see
+command-line output.
+
+## Build from source
+
+Requires Python 3.10+ with Tkinter.
 
 ```bash
-Claude-Multi-Setup.exe --list
-Claude-Multi-Setup.exe --remove "Work,Client"               # shortcuts only
-Claude-Multi-Setup.exe --remove Work --delete-data          # + profile to Recycle Bin
-Claude-Multi-Setup.exe --uninstall [--delete-data]          # everything
+pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File build\build_windows.ps1   # Windows → dist\Claude-Multi-Setup.exe
+bash build/build_macos.sh                                          # macOS  → dist/Claude Multi Setup.app
+python build/package_release.py v1.3                               # release zips → release/
 ```
+Or run directly: `python run.py`.
 
-## Layout
+## Known limitations
 
-```
-app/
-  main.py              # CLI / GUI entry (+ --repair, --check-update)
-  gui.py               # Tkinter wizard (names, colors, badges, previews)
-  core/
-    platform.py        # OS detection, Claude discovery, name validation, manifest
-    asar.py            # pure-Python asar reader/writer + Electron fuse flip
-    asar_patch.py      # Windows patch pipeline, launch shim, self-test, safe swap
-    icons.py           # per-instance icon rendering (Pillow)
-    launcher.py        # .lnk / .command / .sh launcher + shortcut generation
-    update_check.py    # sign-in update check (Windows Run key)
-    remove.py          # remove instances / full uninstall (Recycle Bin for data)
-    startup.py         # start instances at sign-in (Startup folder / LaunchAgent / autostart)
-    setup.py           # orchestration (+ repair/version compare)
-build/                 # PyInstaller scripts per OS
-```
+- The Windows exe is not code-signed (SmartScreen warning). Antivirus software may flag a tool that modifies another app's files.
+- macOS: a *running* instance shows Claude's normal Dock icon; the colored icon is on the launcher app.
+- Several instances starting at sign-in each load a full Claude app, so sign-in can be slower on low-end PCs.
+- Signing in through a browser link (`claude://`) is handled by whichever Claude is registered for it; check sign-in works for each instance.
+- Standalone (non-Store) Windows installs and Linux are not fully tested.
 
 ## Troubleshooting
 
-| Symptom | Fix |
+| Problem | Fix |
 |---|---|
-| Second instance won't open | Use the wizard's shortcut, not the original Claude shortcut. |
-| "Self-test failed" | This Claude version changed its startup code; the old copy keeps working. Update this tool. |
-| "Claude process(es) are running from the patched copy" | Close all extra Claude windows (check the tray), then re-run. |
-| Exit code `-36861` on Windows | Integrity fuse still on — re-run the wizard. |
-| Both instances share one profile | Launcher must pass `--user-data-dir` to the patched copy exe. |
-| Old taskbar pin opens the wrong thing | Unpin it and pin the new colored desktop shortcut instead. |
-| Icons are plain Claude icons | Pillow was missing when the tool was built/run; rebuild with `requirements.txt`. |
+| "Claude process(es) are running from the patched copy" | Close all extra Claude windows (check the tray), then retry. |
+| "Self-test failed" / "Could not locate the relocation code" | This Claude version changed its startup code. Your current instances keep working; wait for an updated version of this tool. |
+| A second instance only focuses the first one | Use the tool's shortcut/app for that instance, not the original Claude. |
+| Old taskbar pin opens the wrong thing | Unpin it and pin the new colored shortcut. |
+| Icons are plain Claude icons | Pillow was missing when building; `pip install -r requirements.txt` and rebuild. |
+
+## Project layout
+
+```text
+app/
+  main.py            command-line options, starts the setup window
+  gui.py             Tkinter setup window
+  core/
+    platform.py      OS detection, Claude discovery, name validation, instance list
+    asar.py          pure-Python asar reader/writer + Electron fuse flip
+    asar_patch.py    Windows patch, launch shim, self-test, safe swap
+    icons.py         colored instance icons (Pillow)
+    launcher.py      shortcuts (.lnk) / macOS launcher apps / Linux launchers
+    startup.py       start at sign-in
+    update_check.py  Windows sign-in update reminder
+    remove.py        remove instances / uninstall
+    setup.py         orchestration
+build/               build scripts (PyInstaller) and release packaging
+docs/                install notes shipped with the Windows download, screenshots
+```
+
+## Versions
+
+See [CHANGELOG.md](CHANGELOG.md). v1.0 and v1.1 are outdated and have a bug
+that stops the setup window from opening; use v1.3.

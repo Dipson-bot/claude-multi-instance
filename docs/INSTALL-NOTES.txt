@@ -1,5 +1,5 @@
 ==========================================================
-Claude Multi-Instance Setup  v1.2
+Claude Multi-Instance Setup  v1.3
       Run multiple Claude Desktop profiles on one machine
 ==========================================================
 
@@ -38,9 +38,12 @@ Windows (Store build):
     to update the instances.
   - Profiles live in %LOCALAPPDATA%\Claude-<Name>
 
-macOS / Linux:
-  - Generates .command / shell launchers that pass --user-data-dir,
-    with the instance's colored icon.
+macOS:
+  - Creates one app per instance in ~/Applications ("Claude Work.app")
+    with its colored icon - open it from Spotlight, Launchpad, the
+    Desktop shortcut or the Dock. See MAC-QUICKSTART.md.
+Linux:
+  - Generates shell launchers + desktop entries with the colored icon.
   - Profiles live in ~/Library/Application Support/Claude-<Name>  (mac)
                      ~/.config/Claude-<Name>                      (Linux)
 

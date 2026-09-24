@@ -37,6 +37,39 @@ def windows_args(inst: Instance) -> str:
     return " ".join(args)
 
 
+def mac_app_path(home: str, name: str) -> str:
+    """The per-instance launcher app, e.g. ~/Applications/Claude Work.app."""
+    return os.path.join(home, "Applications", f"Claude {name}.app")
+
+
+def mac_bundle_id(name: str) -> str:
+    safe = "".join(c for c in name if c.isalnum()) or "Instance"
+    return f"com.claude-multi-setup.{safe}"
+
+
+def mac_claude_bundle(claude_exe: str) -> str:
+    """/Applications/Claude.app from .../Claude.app/Contents/MacOS/Claude."""
+    i = claude_exe.find(".app/")
+    return claude_exe[:i + 4] if i >= 0 else "/Applications/Claude.app"
+
+
+def _sh_quote(s: str) -> str:
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _mac_register(app: str) -> None:
+    """Tell Launch Services / Spotlight about a new app right away."""
+    import subprocess
+
+    lsregister = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+                  "LaunchServices.framework/Support/lsregister")
+    try:
+        subprocess.run([lsregister, "-f", app], capture_output=True, timeout=60)
+        subprocess.run(["touch", app], capture_output=True, timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class LauncherBuilder:
     def __init__(self, log: LogFn | None = None) -> None:
         self.log = log or (lambda msg: None)
@@ -95,46 +128,75 @@ class LauncherBuilder:
 
     # ---- macOS ---- #
 
-    def build_macos(self, instances: list[Instance], app_bundle: str, desktop: str) -> None:
+    def build_macos(self, instances: list[Instance], claude_exe: str, desktop: str,
+                    home: str | None = None) -> None:
+        """One small app per instance in ~/Applications ("Claude Work.app").
+
+        Each has its own name and colored icon, so it can be found with
+        Spotlight / Launchpad / Finder and pinned to the Dock; opening it starts
+        Claude on that instance's profile. A shortcut is put on the Desktop.
+        Claude itself is not modified, so a *running* instance shows Claude's
+        own Dock icon.
+        """
+        import shutil
+
+        home = home or os.path.expanduser("~")
+        claude_app = mac_claude_bundle(claude_exe)
+        apps_dir = os.path.join(home, "Applications")
+        os.makedirs(apps_dir, exist_ok=True)
         os.makedirs(desktop, exist_ok=True)
         for inst in instances:
-            sh_path = os.path.join(desktop, f"Claude-{inst.name}.command")
-            if inst.is_primary:
-                cmd = f'open -a "Claude"\n'
-            else:
-                cmd = (
-                    f'CLAUDE_USER_DATA_DIR="{inst.profile_dir}"\n'
-                    f'open -na "Claude" --args --user-data-dir="{inst.profile_dir}"\n'
-                )
-            script = "#!/bin/bash\n" + cmd
-            with open(sh_path, "w", encoding="utf-8") as fh:
-                fh.write(script)
-            os.chmod(sh_path, 0o755)
-            inst.launcher = sh_path
-            if inst.icon:
-                self._mac_set_file_icon(sh_path, inst.icon)
-            self.log(f"  + launcher {sh_path}")
+            app = mac_app_path(home, inst.name)
+            if os.path.isdir(app):
+                shutil.rmtree(app)
+            macos_dir = os.path.join(app, "Contents", "MacOS")
+            res_dir = os.path.join(app, "Contents", "Resources")
+            os.makedirs(macos_dir)
+            os.makedirs(res_dir)
 
-    def _mac_set_file_icon(self, path: str, image: str) -> None:
-        """Give a Finder file a custom icon (NSWorkspace setIcon:forFile:)."""
-        import subprocess
+            args = "" if inst.is_primary else f' --args --user-data-dir={_sh_quote(inst.profile_dir)}'
+            script = os.path.join(macos_dir, "launch")
+            with open(script, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("#!/bin/bash\n"
+                         f"# Opens Claude on the '{inst.name}' profile (Claude Multi-Instance Setup)\n"
+                         f"exec /usr/bin/open -na {_sh_quote(claude_app)}{args}\n")
+            os.chmod(script, 0o755)
 
-        def lit(s: str) -> str:  # AppleScript string literal
-            return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            plist = {
+                "CFBundleName": f"Claude {inst.name}",
+                "CFBundleDisplayName": f"Claude {inst.name}",
+                "CFBundleIdentifier": mac_bundle_id(inst.name),
+                "CFBundleExecutable": "launch",
+                "CFBundlePackageType": "APPL",
+                "CFBundleShortVersionString": "1.0",
+                "CFBundleVersion": "1",
+                "LSUIElement": True,  # the launcher itself never shows in the Dock
+                "NSHighResolutionCapable": True,
+            }
+            if inst.icon and os.path.isfile(inst.icon):
+                shutil.copyfile(inst.icon, os.path.join(res_dir, "AppIcon.icns"))
+                plist["CFBundleIconFile"] = "AppIcon"
+            import plistlib
 
-        script = (
-            'use framework "AppKit"\n'
-            f"set img to current application's NSImage's alloc()'s initWithContentsOfFile:{lit(image)}\n"
-            "current application's NSWorkspace's sharedWorkspace()'s "
-            f"setIcon:img forFile:{lit(path)} options:0\n"
-        )
-        try:
-            proc = subprocess.run(["osascript", "-"], input=script, capture_output=True,
-                                  text=True, timeout=60)
-            if proc.returncode != 0:
-                self.log(f"  NOTE: could not set icon on {path}: {proc.stderr.strip()[-200:]}")
-        except Exception as exc:  # noqa: BLE001
-            self.log(f"  NOTE: could not set icon on {path}: {exc}")
+            with open(os.path.join(app, "Contents", "Info.plist"), "wb") as fh:
+                plistlib.dump(plist, fh)
+
+            # Desktop shortcut (replaces the .command files of earlier versions)
+            legacy = os.path.join(desktop, f"Claude-{inst.name}.command")
+            if os.path.isfile(legacy):
+                os.remove(legacy)
+            link = os.path.join(desktop, f"Claude {inst.name}")
+            if os.path.islink(link) or os.path.isfile(link):
+                os.remove(link)
+            try:
+                os.symlink(app, link)
+            except OSError as exc:
+                self.log(f"  NOTE: no Desktop shortcut for {inst.name}: {exc}")
+
+            _mac_register(app)
+            inst.launcher = app
+            inst.shortcut = link
+            self.log(f"  + app {app}")
 
     # ---- Linux ---- #
 

@@ -155,10 +155,10 @@ class ClaudeSetup:
         elif p.is_macos:
             instances = self._build_instances(cfg)
             base = cfg.base_dir or p.root_install_dir()
-            self._make_icons(instances, base, ".png", installs[0])
+            self._make_icons(instances, base, ".icns", installs[0])
             if installs[0].kind == "app":
                 desktop = p.desktop_dir()
-                self.launcher.build_macos(instances, installs[0].app_dir or "", desktop)
+                self.launcher.build_macos(instances, installs[0].exe_path or "", desktop, home=p.home)
             self._apply_startup(instances)
             self._write_manifest(base, instances)
             res.instances = instances

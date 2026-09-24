@@ -126,8 +126,8 @@ class SetupWizard(tk.Tk):
         for w in self._container.winfo_children():
             w.destroy()
 
-    def _badge(self, parent, text: str, color: str = GOOD) -> tk.Label:
-        return tk.Label(parent, text=f"  {text}  ", bg=color, fg="#11151c",
+    def _badge(self, parent, text: str, color: str = GOOD, fg: str = "#11151c") -> tk.Label:
+        return tk.Label(parent, text=f"  {text}  ", bg=color, fg=fg,
                         font=("Segoe UI", 9, "bold"))
 
     # ------------------------------------------------------------- screens -- #
@@ -530,7 +530,7 @@ class SetupWizard(tk.Tk):
             tk.Label(r, text=p.profile_dir(safe_name(n)), bg=PANEL, fg=MUTED, anchor="w",
                      font=("Cascadia Mono", 9)).pack(side="left")
             if st.get("startup"):
-                self._badge(r, "starts at sign-in", "#3b4a63").pack(side="right", padx=8)
+                self._badge(r, "starts at sign-in", "#3b4a63", fg=TEXT).pack(side="right", padx=8)
 
         if p.is_windows:
             from .core import update_check

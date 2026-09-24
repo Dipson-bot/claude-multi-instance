@@ -12,7 +12,7 @@ import os
 import plistlib
 from typing import Callable
 
-from .launcher import Instance, LauncherBuilder, windows_args
+from .launcher import Instance, LauncherBuilder, mac_app_path, mac_bundle_id, windows_args
 from .platform import Platform, safe_name
 
 LogFn = Callable[[str], None]
@@ -94,13 +94,19 @@ def set_enabled(inst: Instance, enabled: bool, p: Platform | None = None,
         # re-enabling here must also undo a "Disabled" set in Task Manager
         _win_clear_task_manager_flag(os.path.basename(path))
     elif p.is_macos:
+        app = mac_app_path(p.home, inst.name)
+        launch = os.path.join(app, "Contents", "MacOS", "launch")
+        agent = {
+            "Label": _MAC_LABEL.format(safe_name(inst.name)),
+            # the instance's own launcher app, so System Settings > Login Items
+            # lists it as "Claude <name>" rather than as "open"
+            "ProgramArguments": [launch] if os.path.isfile(launch) else
+            ["/usr/bin/open", "-na", "Claude", "--args", f"--user-data-dir={inst.profile_dir}"],
+            "AssociatedBundleIdentifiers": [mac_bundle_id(inst.name)],
+            "RunAtLoad": True,
+        }
         with open(path, "wb") as fh:
-            plistlib.dump({
-                "Label": _MAC_LABEL.format(safe_name(inst.name)),
-                "ProgramArguments": ["/usr/bin/open", "-na", "Claude", "--args",
-                                     f"--user-data-dir={inst.profile_dir}"],
-                "RunAtLoad": True,
-            }, fh)
+            plistlib.dump(agent, fh)
     else:
         launcher = inst.launcher or os.path.join(p.desktop_dir(), f"Claude-{inst.name}.sh")
         with open(path, "w", encoding="utf-8") as fh:

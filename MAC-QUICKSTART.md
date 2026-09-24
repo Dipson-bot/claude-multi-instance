@@ -10,7 +10,7 @@ so please note anything odd (screenshots help).
   `brew install python-tk`.)
 
 ## Run it
-1. Unzip `Claude-Multi-Setup-v1.2-macOS.zip` (e.g. into Downloads).
+1. Unzip `Claude-Multi-Setup-v1.3-macOS.zip` (e.g. into Downloads).
 2. Open **Terminal** and run:
    ```bash
    cd ~/Downloads/claude-multi-setup
@@ -20,15 +20,18 @@ so please note anything odd (screenshots help).
    the folder; nothing is installed system-wide).
 3. The setup window opens. Pick names, colors and badges, then **Continue →
    Install**.
-4. On your Desktop you get one `Claude-<Name>.command` launcher per instance.
-   Double-click one to open that instance and sign in with a different account.
+4. Each instance becomes its own app in your **Applications** folder, e.g.
+   **Claude Work** and **Claude Personal**, with its colored icon:
+   - open it with **Spotlight** (Command-Space, type "Claude Work"), Launchpad or Finder;
+   - or use the shortcut on your Desktop;
+   - you can drag it to the Dock to keep it there.
    The first time, macOS may ask to allow it: right-click → **Open**.
 
 ## What to check
 - [ ] The setup window opens and finds Claude ("App" badge).
 - [ ] Color swatches, badges and icon previews look right.
 - [ ] Install finishes without errors.
-- [ ] Each Desktop launcher shows its colored icon.
+- [ ] Spotlight finds "Claude Work" etc. with the colored icon, and opening it starts that instance.
 - [ ] Two instances run **at the same time** with **different accounts**.
 - [ ] Quit and reopen an instance: still signed in to the same account.
 - [ ] **Startup…** → tick one → log out and back in: that instance opens by itself.
@@ -37,15 +40,16 @@ so please note anything odd (screenshots help).
 - [ ] The original Claude still opens normally with its own account.
 
 ## Known differences from Windows
-- The Mac version doesn't modify Claude, so the window title and Dock
-  icon are Claude's own. The colored icon is on the Desktop launcher only.
-- Launchers are `.command` files, which open a Terminal window for a moment.
+- The Mac version doesn't modify Claude. The instance apps (Spotlight,
+  Launchpad, Desktop, pinned in the Dock) have the colored icons, but a
+  *running* instance shows Claude's normal icon in the Dock and window title.
 - There is no sign-in update reminder on Mac. Claude updates in place and the
   instances use the updated app automatically.
 
 ## Useful commands (Terminal, in the folder)
 ```bash
 bash start-mac.sh --list                       # instances + who starts at login
+# re-run setup to update an older install: bash start-mac.sh  → Continue → Install
 bash start-mac.sh --startup-off all            # stop all auto-starts
 bash start-mac.sh --remove "Work"              # remove an instance (keeps data)
 ```
