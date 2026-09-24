@@ -1,95 +1,98 @@
 ==========================================================
-Claude Multi-Instance Setup  v1.1
+Claude Multi-Instance Setup  v1.2
       Run multiple Claude Desktop profiles on one machine
 ==========================================================
 
 QUICK START
 -----------
 1. Double-click  Claude-Multi-Setup.exe
-2. Pick how many instances you want (e.g. "Instance 2", "Work")
-3. Click  Install
-4. Open each new desktop shortcut and sign in separately
+2. Pick how many instances you want and name them (e.g. "Work")
+3. Pick a color and badge letters for each one (preview shown)
+4. Click  Continue, then  Install
+5. Open each new colored desktop shortcut and sign in separately
    - each profile is fully isolated (accounts, files, settings)
-5. Done — all instances run simultaneously
+6. Done - all instances run simultaneously. Each window title
+   ("Claude - Work") and taskbar button shows which one it is.
 
 TIP: If you already set up instances before, the wizard detects them,
-pre-fills the list, and refreshes them without touching your profiles.
+pre-fills names/colors, and refreshes them without touching your profiles.
 
 REQUIREMENTS
 ------------
-• Windows 10/11  — Claude Desktop installed from the Microsoft Store or standalone
-• Node.js 18+    — needed for the patching step (https://nodejs.org)
-                    (only required on first install / after a Claude update)
-• macOS / Linux  — build from source (see README.md); no patching required
+- Windows 10/11 - Claude Desktop installed from the Microsoft Store
+- Node.js is NOT needed.
+- macOS / Linux - build from source (see README.md); no patching required
 
 WHAT THE WIZARD DOES
 --------------------
-Windows (MSIX / Store build):
-  - Copies the Claude app to a shared location so it doesn't touch the
-    original WindowsApps install.
-  - Patches the Electron asar bundle so --user-data-dir is honoured
-    (the 3P managed-config relocation block is bypassed).
-  - Disables the asar integrity fuse on the copy so the patch survives.
-  - Creates one .vbs launcher + desktop shortcut per instance.
+Windows (Store build):
+  - Copies the Claude app to %USERPROFILE%\ClaudeInstances\app so the
+    original install is never modified.
+  - Patches the copy so --user-data-dir is honoured (the managed-config
+    relocation to Claude-3p is bypassed) and disables the asar integrity
+    fuse on the copy.
+  - Runs a self-test before installing the copy; if anything fails, the
+    previous copy keeps working.
+  - Creates one colored desktop shortcut per instance.
+  - Optionally checks at sign-in whether Claude was updated and offers
+    to update the instances.
   - Profiles live in %LOCALAPPDATA%\Claude-<Name>
 
 macOS / Linux:
-  - Generates .command / shell launchers that pass --user-data-dir
-    plus the CLAUDE_USER_DATA_DIR env var.
+  - Generates .command / shell launchers that pass --user-data-dir,
+    with the instance's colored icon.
   - Profiles live in ~/Library/Application Support/Claude-<Name>  (mac)
-                                     ~/.config/Claude-<Name>       (Linux)
+                     ~/.config/Claude-<Name>                      (Linux)
 
-CLI MODE (no GUI)
------------------
+CLI MODE (no window)
+--------------------
   Claude-Multi-Setup.exe --cli Work,Personal,School
-  Claude-Multi-Setup.exe --cli --repair          (re-patch existing after update)
+  Claude-Multi-Setup.exe --cli --repair          (update after a Claude update)
+  add --no-update-check to turn off the sign-in reminder
 
-REINSTALL AFTER A CLAUDE UPDATE
--------------------------------
-When Anthropic releases a new Claude Desktop version the Store/MSIX app
-will be updated automatically.  The patched copy will no longer match the
-new code.  Re-run the wizard (or run  --cli --repair  headless) — it
-detects the new version and re-patches.  Your profiles and launchers are
-preserved.
+AFTER A CLAUDE UPDATE
+---------------------
+The Store updates the original Claude automatically. The extra instances
+stay on the version they were built from (they keep working, but miss
+the new version's fixes). After your next sign-in you are asked whether
+to update them - or re-run the wizard, or run  --cli --repair .
+Close the extra Claude windows first. Profiles, colors and shortcuts
+are preserved.
 
 TROUBLESHOOTING
 ---------------
 Q: Only one instance opens when I double-click shortcuts
-A: Make sure you're clicking the shortcuts created by the wizard
-   (named "Claude (<Name>).lnk"), NOT the original Claude shortcut
-   pinned to your taskbar.  The taskbar pin must also point to the
-   .vbs launcher, not the bare .exe.
+A: Use the shortcuts created by the wizard ("Claude (<Name>)"), not the
+   original Claude shortcut.
 
-Q: "Access is denied" during patch
-A: Close all Claude windows first, then re-run.
+Q: "Claude process(es) are running from the patched copy"
+A: Close all extra Claude windows (check the system tray), then re-run.
 
-Q: Patch says "Could not locate the relocation code"
-A: Claude renamed its bundled patch target (DW/Cl -> FJ across versions).
-   v1.1 of this wizard recognises all known layouts (Claude <=1.5x and 2.x).
+Q: "Could not locate the userData relocation code" / "Self-test failed"
+A: This Claude version changed its startup code in a way this tool does
+   not recognise yet. Your existing instances keep working on the
+   previous version; get an updated version of this tool.
 
 Q: Exit code -36861 when launching
-A: The integrity fuse is still active on the copied exe.
-   Re-run the wizard, or manually:
-     npx @electron/fuses write --app <path>Claude.exe \
-         EnableEmbeddedAsarIntegrityValidation=off
+A: The integrity fuse is still active on the copied exe. Re-run the wizard.
 
 Q: Both instances land on the same profile
-A: Ensure the launcher sets CLAUDE_USER_DATA_DIR and passes
-   --user-data-dir with the same path.  The .vbs launchers
-   generated by the wizard do both automatically.
+A: Use the wizard's shortcuts; they pass --user-data-dir to the patched
+   copy. Re-run the wizard to recreate them.
+
+Q: An old taskbar pin opens the wrong thing
+A: Unpin it and pin the new colored desktop shortcut instead.
 
 FILES CREATED BY THE WIZARD
-----------------------------
-  <base>\Claude-<Name>.vbs          launcher for instance <Name>
-  <base>\ClaudeInstances\app\       shared patched Claude app (Windows only)
-  <base>\ClaudeInstances\icon.ico   shortcut icon
+---------------------------
+  %USERPROFILE%\ClaudeInstances\app\               shared patched Claude app
+  %USERPROFILE%\ClaudeInstances\Claude-<Name>.lnk  launcher (safe to pin)
+  %USERPROFILE%\ClaudeInstances\icons\             per-instance icons
+  %USERPROFILE%\ClaudeInstances\instances.json     names, colors, badges
 
   %LOCALAPPDATA%\Claude-<Name>\     profile data (config, auth, history)
-  %APPDATA%\Claude\                 original / default profile
-
   Desktop\Claude (<Name>).lnk       desktop shortcut per instance
-  TaskBar\Claude <Name>.lnk         taskbar pin per instance
 
 ==========================================================
-  Questions / issues →  open an issue at the project repo
+  Questions / issues ->  open an issue at the project repo
 ==========================================================

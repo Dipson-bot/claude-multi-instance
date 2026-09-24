@@ -11,7 +11,7 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 $Name = if ($env:CLAUDE_SETUP_NAME) { $env:CLAUDE_SETUP_NAME } else { "Claude-Multi-Setup" }
 
 Write-Host "Installing PyInstaller..."
-python -m pip install --quiet --upgrade pyinstaller
+python -m pip install --quiet --upgrade -r requirements.txt
 
 Write-Host "Building $Name.exe ..."
 python -m PyInstaller `

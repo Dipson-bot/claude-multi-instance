@@ -1,5 +1,6 @@
-# Requirements for the setup wizard (runtime). Tkinter ships with Python on
+# Requirements for the setup wizard. Tkinter ships with Python on
 # Windows/macOS; Linux needs python3-tk (apt install python3-tk).
-# Packaging requires: pip install pyinstaller
+# Node.js is NOT required (asar patching is pure Python).
 
-pyinstaller>=6.0
+pillow>=10.1      # per-instance colored icons
+pyinstaller>=6.0  # packaging only

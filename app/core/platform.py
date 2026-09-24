@@ -12,6 +12,52 @@ import sys
 from dataclasses import dataclass, field
 
 
+MANIFEST_FILENAME = "instances.json"
+
+_BAD_CHARS = set('<>:"/\\|?*')
+_WIN_DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                *(f"LPT{i}" for i in range(1, 10))}
+# Suffixes Claude itself uses for its own profile folders (Claude-3p, ...).
+_RESERVED = {"3p", "3p-dev", "dev"}
+MAX_NAME_LEN = 40
+
+
+def safe_name(name: str) -> str:
+    """Folder-safe form of an instance name: profile is Claude-<safe_name>."""
+    return name.strip().replace(" ", "")
+
+
+def validate_names(names: list[str]) -> list[str]:
+    """Return human-readable problems with the chosen instance names ([] = ok)."""
+    problems: list[str] = []
+    seen: dict[str, str] = {}
+    for raw in names:
+        name = raw.strip()
+        label = f'"{raw}"'
+        if not name:
+            problems.append("Instance names cannot be empty.")
+            continue
+        if len(name) > MAX_NAME_LEN:
+            problems.append(f"{label} is too long (max {MAX_NAME_LEN} characters).")
+        bad = sorted({c for c in name if c in _BAD_CHARS or ord(c) < 32})
+        if bad:
+            shown = " ".join(c if ord(c) >= 32 else "control character" for c in bad)
+            problems.append(f"{label} contains characters that are not allowed: {shown}")
+        if name.endswith("."):
+            problems.append(f"{label} cannot end with a dot.")
+        s = safe_name(name)
+        if s.upper() in _WIN_DEVICES or s.split(".")[0].upper() in _WIN_DEVICES:
+            problems.append(f"{label} is a reserved Windows name.")
+        if s.lower() in _RESERVED:
+            problems.append(f"{label} would reuse Claude's own profile folder (Claude-{s}).")
+        key = s.lower()
+        if key in seen:
+            problems.append(f"{label} and \"{seen[key]}\" would share the same profile folder.")
+        else:
+            seen[key] = raw
+    return list(dict.fromkeys(problems))
+
+
 @dataclass
 class ClaudeInstall:
     """A detectable Claude Desktop installation."""
@@ -193,6 +239,15 @@ class Platform:
                     )
         return out
 
+    def _find_linux(self) -> list[ClaudeInstall]:
+        """Community Linux builds (there is no official one); best effort."""
+        out: list[ClaudeInstall] = []
+        for exe in [shutil.which("claude-desktop"), "/usr/bin/claude-desktop",
+                    "/opt/Claude/claude", "/usr/lib/claude-desktop/claude-desktop"]:
+            if exe and os.path.isfile(exe):
+                out.append(ClaudeInstall(kind="standard", exe_path=exe, app_dir=os.path.dirname(exe)))
+        return out
+
     # ---- misc helpers ---- #
 
     def detect_existing_instances(self) -> list[str]:
@@ -201,12 +256,11 @@ class Platform:
         Scans launchers on disk (the same files we create). Used to prefill the
         wizard after a Claude update so the user can simply re-run to repair.
         """
-        names: list[str] = []
+        names: list[str] = [i["name"] for i in self.load_manifest()]
         root = self.root_install_dir()
-        if not os.path.isdir(root):
-            return names
 
-        if self.is_windows:
+        # launchers from older versions of this tool (no manifest)
+        if self.is_windows and os.path.isdir(root):
             import glob
 
             for vbs in glob.glob(os.path.join(root, "Claude-*.vbs")):
@@ -214,16 +268,40 @@ class Platform:
                 if base.lower().startswith("claude-") and base.lower().endswith(".vbs"):
                     names.append(base[len("Claude-"):-len(".vbs")])
         elif self.is_macos:
-            desktop = os.path.join(self.home, "Desktop")
+            desktop = self.desktop_dir()
             for fn in sorted(os.listdir(desktop)) if os.path.isdir(desktop) else []:
                 if fn.startswith("Claude-") and fn.endswith(".command"):
                     names.append(fn[len("Claude-"):-len(".command")])
         elif self.is_linux:
-            desktop = os.path.join(self.home, "Desktop")
+            desktop = self.desktop_dir()
             for fn in sorted(os.listdir(desktop)) if os.path.isdir(desktop) else []:
                 if fn.startswith("Claude-") and fn.endswith(".sh"):
                     names.append(fn[len("Claude-"):-len(".sh")])
-        return [n for n in names if n]
+        return list(dict.fromkeys(n for n in names if n))
+
+    def desktop_dir(self) -> str:
+        """The user's real Desktop folder (OneDrive can redirect it on Windows)."""
+        if self.is_windows:
+            try:
+                import ctypes
+
+                buf = ctypes.create_unicode_buffer(260)
+                # CSIDL_DESKTOPDIRECTORY = 0x10
+                if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf) == 0 and buf.value:
+                    return buf.value
+            except Exception:
+                pass
+            return os.path.join(os.environ.get("USERPROFILE", self.home), "Desktop")
+        return os.path.join(self.home, "Desktop")
+
+    def load_manifest(self) -> list[dict]:
+        """Instances recorded by the last setup: [{name, profile_dir, color, badge, ...}]."""
+        try:
+            with open(os.path.join(self.root_install_dir(), MANIFEST_FILENAME), encoding="utf-8") as fh:
+                items = json.load(fh).get("instances", [])
+            return [i for i in items if isinstance(i, dict) and i.get("name")]
+        except Exception:
+            return []
 
     @staticmethod
     def _hide_window() -> int:

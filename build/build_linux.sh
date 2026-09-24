@@ -4,7 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m pip install --quiet --upgrade pyinstaller
+python3 -m pip install --quiet --upgrade -r requirements.txt
+[ -f icon.png ] || python3 build/make_icon.py
 
 python3 -m PyInstaller \
   --noconfirm --clean --onefile \
