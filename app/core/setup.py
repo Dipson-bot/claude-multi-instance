@@ -9,7 +9,8 @@ from typing import Callable
 
 from . import icons, startup, update_check
 from .asar import AsarArchive
-from .platform import MANIFEST_FILENAME, ClaudeInstall, Platform, safe_name, validate_names
+from .platform import (MANIFEST_FILENAME, ClaudeInstall, Platform, safe_name,
+                       same_path, validate_names)
 from .asar_patch import _SHIM_MARKER, AsarPatcher, PatchResult, read_sidecar_version
 from .launcher import LauncherBuilder, Instance
 
@@ -26,9 +27,13 @@ class SetupConfig:
     # Off by default: the wizard asks for instances *besides* the original, and a
     # launcher on the default profile just focuses the already-running original.
     primary_is_own: bool = False
-    # {name: {"color": "#RRGGBB", "badge": "W"}}. Missing entries keep the
-    # style from the previous setup, else get a default palette color/initials.
+    # {name: {"color": "#RRGGBB", "badge": "W", "startup": bool, "profile_dir": path}}.
+    # Missing entries keep what the previous setup used, else get defaults.
+    # "profile_dir" lets an instance continue any existing Claude folder.
     styles: dict[str, dict] = field(default_factory=dict)
+    # {old name: new name}: renamed instances keep their profile folder; the
+    # old name's shortcuts are removed.
+    renames: dict[str, str] = field(default_factory=dict)
     # Windows: check for Claude updates at sign-in and offer to update instances.
     update_check: bool = True
     # Rebuild the patched copy even when it is already up to date (--repair).
@@ -73,6 +78,10 @@ class ClaudeSetup:
         problems = validate_names(cfg.instance_names)
         if problems:
             res.ok, res.message = False, "Please fix the instance names:\n" + "\n".join(problems)
+            return res
+        problems = self.profile_problems(self._build_instances(cfg))
+        if problems:
+            res.ok, res.message = False, "Please fix the profile folders:\n" + "\n".join(problems)
             return res
         installs = p.find_claude()
         if not installs:
@@ -141,7 +150,8 @@ class ClaudeSetup:
             desktop = p.desktop_dir()
             self.launcher.build_windows(instances, copy_exe, base, desktop)
             self._apply_startup(instances)
-            self._write_manifest(base, instances)
+            self._apply_renames(cfg)
+            self._write_manifest(base, instances, tuple(cfg.renames))
             res.instances = instances
             try:
                 if cfg.update_check:
@@ -160,7 +170,8 @@ class ClaudeSetup:
                 desktop = p.desktop_dir()
                 self.launcher.build_macos(instances, installs[0].exe_path or "", desktop, home=p.home)
             self._apply_startup(instances)
-            self._write_manifest(base, instances)
+            self._apply_renames(cfg)
+            self._write_manifest(base, instances, tuple(cfg.renames))
             res.instances = instances
 
         # ---- Linux ---- #
@@ -173,7 +184,8 @@ class ClaudeSetup:
             exe = installs[0].exe_path or "claude"
             self.launcher.build_linux(instances, exe, desktop, applications)
             self._apply_startup(instances)
-            self._write_manifest(base, instances)
+            self._apply_renames(cfg)
+            self._write_manifest(base, instances, tuple(cfg.renames))
             res.instances = instances
 
         self._verify_profiles(res)
@@ -186,15 +198,20 @@ class ClaudeSetup:
         if not names:
             return []
         p = self.platform
-        previous = {m["name"]: m for m in p.load_manifest()}
+        previous = {m["name"].lower(): m for m in p.load_manifest()}
+        old_names = {new.lower(): old for old, new in cfg.renames.items()}
         instances = []
         for i, raw in enumerate(names):
             n = raw.strip()
-            style = cfg.styles.get(raw) or cfg.styles.get(n) or previous.get(n) or {}
+            prev = previous.get(n.lower()) or previous.get(old_names.get(n.lower(), "").lower()) or {}
+            style = cfg.styles.get(raw) or cfg.styles.get(n) or prev
             instances.append(
                 Instance(
                     name=n,
-                    profile_dir=p.profile_dir(safe_name(n)),
+                    # explicit choice, else the folder it used before (also
+                    # after a rename), else a new folder named after it
+                    profile_dir=((cfg.styles.get(raw) or cfg.styles.get(n) or {}).get("profile_dir")
+                                 or prev.get("profile_dir") or p.profile_dir(safe_name(n))),
                     is_primary=(cfg.primary_is_own and i == 0),
                     color=icons.normalize_color(style.get("color", "")) or icons.default_color(i),
                     badge=(style["badge"] if "badge" in style else icons.default_badge(n))[:2],
@@ -206,6 +223,32 @@ class ClaudeSetup:
                 )
             )
         return instances
+
+    def profile_problems(self, instances: list[Instance]) -> list[str]:
+        """Two instances cannot share a folder, and none may take the folder
+        the normal Claude app uses (both would fight over it)."""
+        problems = []
+        mains = self.platform.main_profiles()
+        for k, inst in enumerate(instances):
+            if any(same_path(inst.profile_dir, m) for m in mains):
+                problems.append(f'"{inst.name}" is set to your main Claude\'s folder. Your main Claude '
+                                "keeps using it; pick another folder for this instance.")
+            for other in instances[:k]:
+                if same_path(inst.profile_dir, other.profile_dir):
+                    problems.append(f'"{inst.name}" and "{other.name}" use the same folder '
+                                    f"({inst.profile_dir}); two instances cannot share one.")
+        return problems
+
+    def _apply_renames(self, cfg: SetupConfig) -> None:
+        """Remove shortcuts/icons/startup entries left under old names."""
+        from .remove import remove_launchers
+
+        current = {n.strip().lower() for n in cfg.instance_names}
+        for old, new in cfg.renames.items():
+            # skip when the old name is still in use (e.g. two instances swapped names)
+            if old.strip() and old.strip().lower() != new.strip().lower() and old.strip().lower() not in current:
+                self.log(f"  renamed {old} -> {new} (same profile folder)")
+                remove_launchers(old, self.platform, self.log)
 
     def _copy_is_current(self, base: str, installed_version: str | None) -> bool:
         """True when <base>/app was built from the installed Claude by this
@@ -266,7 +309,7 @@ class ClaudeSetup:
         for inst in existing:
             self.log(f"    keep profile: {inst.profile_dir}")
 
-    def _write_manifest(self, base: str, instances: list[Instance]) -> None:
+    def _write_manifest(self, base: str, instances: list[Instance], renamed: tuple[str, ...] = ()) -> None:
         """Record the instances so a later run (repair) can find them again."""
         os.makedirs(base, exist_ok=True)
         path = os.path.join(base, MANIFEST_FILENAME)
@@ -275,7 +318,7 @@ class ClaudeSetup:
                 for i in instances]
         # Instances left out of this run keep working (their shortcuts point at
         # the same copy), so keep them listed; removal is explicit (remove.py).
-        current = {i.name.lower() for i in instances}
+        current = {i.name.lower() for i in instances} | {r.lower() for r in renamed}
         data += [m for m in self.platform.load_manifest() if m["name"].lower() not in current]
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"instances": data}, fh, indent=2)

@@ -20,6 +20,8 @@ _WIN_DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
 # Suffixes Claude itself uses for its own profile folders (Claude-3p, ...).
 _RESERVED = {"3p", "3p-dev", "dev"}
 MAX_NAME_LEN = 40
+# Package family names of the Microsoft Store Claude (seen in Claude's own code).
+_MSIX_FAMILIES = ("Claude_pzs8sxrjxfjjc", "AnthropicPBC.Claude_fnn82j28hfe8t")
 
 
 def safe_name(name: str) -> str:
@@ -56,6 +58,35 @@ def validate_names(names: list[str]) -> list[str]:
         else:
             seen[key] = raw
     return list(dict.fromkeys(problems))
+
+
+@dataclass
+class ProfileFolder:
+    """A Claude profile folder found on disk."""
+
+    path: str
+    last_used: float  # newest modification time of its top-level entries
+    is_main: bool  # used by the normal (unmodified) Claude app
+    third_party: bool  # set up for third-party inference (deploymentMode 3p)
+
+    @property
+    def name(self) -> str:
+        return os.path.basename(self.path)
+
+    @property
+    def label(self) -> str:
+        if self.is_main:
+            return "Your main Claude" + (" (third-party)" if self.third_party else "")
+        return self.name + (" (third-party inference)" if self.third_party else "")
+
+
+def is_profile_dir(path: str) -> bool:
+    """True when a folder holds Claude data (not just an empty folder)."""
+    return any(os.path.exists(os.path.join(path, f)) for f in ("Local State", "config.json", "Preferences"))
+
+
+def same_path(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.abspath(a)).rstrip("\\/") == os.path.normcase(os.path.abspath(b)).rstrip("\\/")
 
 
 @dataclass
@@ -100,6 +131,50 @@ class Platform:
     def profile_dir(self, name: str) -> str:
         """Default profile location for an instance named `name`."""
         return os.path.join(self.local_data_root, f"Claude-{name}")
+
+    def main_profiles(self) -> list[str]:
+        """Folders the normal Claude app uses itself (never given to an instance:
+        two Claudes cannot open the same folder at once)."""
+        if self.is_windows:
+            mains = [os.path.join(self.roaming_data_root, "Claude"), self.default_3p_profile]
+            # The Microsoft Store Claude is sandboxed: Windows stores what it
+            # writes to AppData inside its package folder instead.
+            for family in _MSIX_FAMILIES:
+                cache = os.path.join(self.local_data_root, "Packages", family, "LocalCache")
+                mains += [os.path.join(cache, "Roaming", "Claude"), os.path.join(cache, "Local", "Claude-3p")]
+            return mains
+        return [os.path.join(self.local_data_root, "Claude"), self.default_3p_profile]
+
+    def profile_folders(self) -> list[ProfileFolder]:
+        """Claude folders that hold data, newest first."""
+        mains = self.main_profiles()
+        candidates = list(mains)
+        if os.path.isdir(self.local_data_root):
+            candidates += [os.path.join(self.local_data_root, d) for d in os.listdir(self.local_data_root)
+                           if d.lower().startswith("claude")]
+        out: list[ProfileFolder] = []
+        seen: set[str] = set()
+        for path in candidates:
+            key = os.path.normcase(os.path.abspath(path))
+            if key in seen or not os.path.isdir(path) or not is_profile_dir(path):
+                continue
+            seen.add(key)
+            # top-level entries plus folders Claude writes to on every run
+            # (folder times alone miss activity deeper down)
+            last = 0.0
+            for sub in [path] + [os.path.join(path, d) for d in ("logs", "Logs", "Network", "Session Storage", "sentry")]:
+                try:
+                    last = max([last] + [e.stat().st_mtime for e in os.scandir(sub)])
+                except OSError:
+                    pass
+            third = False
+            try:
+                with open(os.path.join(path, "claude_desktop_config.json"), encoding="utf-8") as fh:
+                    third = json.load(fh).get("deploymentMode") == "3p"
+            except Exception:
+                pass
+            out.append(ProfileFolder(path, last, any(same_path(path, m) for m in mains), third))
+        return sorted(out, key=lambda f: f.last_used, reverse=True)
 
     @property
     def default_3p_profile(self) -> str:

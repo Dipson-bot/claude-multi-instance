@@ -91,6 +91,30 @@ def _instance_files(p: Platform, base: str, name: str) -> list[str]:
     return files
 
 
+def remove_launchers(name: str, p: Platform | None = None, log: LogFn | None = None) -> list[str]:
+    """Delete one instance's shortcuts, launcher, icon and startup entry, but
+    never its profile folder. Returns problems ([] = all removed)."""
+    p = p or Platform()
+    log = log or (lambda m: None)
+    problems = []
+    for f in _instance_files(p, p.root_install_dir(), name):
+        if not os.path.lexists(f):
+            continue
+        try:
+            if os.path.isdir(f) and not os.path.islink(f):
+                shutil.rmtree(f)
+            else:
+                os.remove(f)
+            log(f"  deleted {f}")
+        except OSError as exc:
+            problems.append(f"{f}: {exc}")
+    try:
+        startup.set_enabled(Instance(name, ""), False, p, log)
+    except OSError as exc:
+        problems.append(f"startup entry for {name}: {exc}")
+    return problems
+
+
 def _safe_profile(p: Platform, path: str) -> bool:
     """Only ever delete Claude-<instance> folders directly under the data root,
     never the original Claude's own profiles."""

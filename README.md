@@ -20,8 +20,8 @@ Get the latest version from **[Releases](https://github.com/Dipson-bot/claude-mu
 
 | System | File | How to start |
 |---|---|---|
-| Windows 10/11 | `Claude-Multi-Setup-v1.3-Windows.zip` | Unzip, double-click `Claude-Multi-Setup.exe` |
-| macOS | `Claude-Multi-Setup-v1.3-macOS.zip` | Unzip, run `bash start-mac.sh` in Terminal ([guide](MAC-QUICKSTART.md)) |
+| Windows 10/11 | `Claude-Multi-Setup-v1.4-Windows.zip` | Unzip, double-click `Claude-Multi-Setup.exe` |
+| macOS | `Claude-Multi-Setup-v1.4-macOS.zip` | Unzip, run `bash start-mac.sh` in Terminal ([guide](MAC-QUICKSTART.md)) |
 
 Windows may say *"Windows protected your PC"* because the exe is not code-signed
 yet: click **More info → Run anyway**.
@@ -29,6 +29,7 @@ yet: click **More info → Run anyway**.
 ## Features
 
 - **Any number of isolated instances**, each with its own sign-in, chats and settings.
+- **Continue an existing Claude**: point an instance at a folder that already has data, so it keeps its sign-in, chats and sessions. Renaming an instance keeps its data.
 - **Colored icons with a badge** (e.g. a blue **W** for "Work"), with a palette or custom color, and a live preview.
   - Windows: on the desktop shortcut, the taskbar button and the window.
   - macOS: on the instance's app (Spotlight, Launchpad, Dock).
@@ -76,6 +77,34 @@ uses its own *user data directory*.
 
 Profiles live in `%LOCALAPPDATA%\Claude-<Name>` (Windows) or
 `~/Library/Application Support/Claude-<Name>` (macOS).
+
+## Continue an existing Claude instead of starting fresh
+
+Each instance keeps its data in its own profile folder. Under every instance
+the setup window shows which folder it uses:
+
+- **"Continues existing profile …"**: the folder already has data. The
+  instance opens signed in, with its local chats, Claude Code / Cowork sessions
+  and settings, exactly where you left off.
+- **"New profile … starts fresh"**: an empty folder; sign in as new.
+
+Click **Profile…** to choose a different folder, such as an older instance's
+folder or any Claude folder via **Browse…**. Folders are never copied or
+changed. Renaming an instance keeps its folder and data.
+
+![Profile picker](docs/screenshots/profile-picker.png)
+
+Notes:
+- **Your main Claude** (opened from the normal Claude icon) always keeps its
+  own data and is never changed. Its folder can't be given to an instance,
+  because two Claudes cannot open one folder at the same time.
+- On Windows the Microsoft Store Claude stores its data in
+  `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude`
+  rather than `%APPDATA%\Claude`; the tool knows this.
+- Chats of a claude.ai account are stored online and appear in any instance
+  signed in to that account. Third-party inference setups (e.g. a gateway) and
+  Claude Code / Cowork sessions are stored **locally** in the profile folder,
+  so keep using the same folder to keep them.
 
 ## After a Claude update
 
@@ -126,7 +155,7 @@ Requires Python 3.10+ with Tkinter.
 pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File build\build_windows.ps1   # Windows → dist\Claude-Multi-Setup.exe
 bash build/build_macos.sh                                          # macOS  → dist/Claude Multi Setup.app
-python build/package_release.py v1.3                               # release zips → release/
+python build/package_release.py v1.4                               # release zips → release/
 ```
 Or run directly: `python run.py`.
 
@@ -171,4 +200,4 @@ docs/                install notes shipped with the Windows download, screenshot
 ## Versions
 
 See [CHANGELOG.md](CHANGELOG.md). v1.0 and v1.1 are outdated and have a bug
-that stops the setup window from opening; use v1.3.
+that stops the setup window from opening; use the latest version.

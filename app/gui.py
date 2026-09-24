@@ -6,11 +6,12 @@ import os
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 from .core import icons, startup
-from .core.platform import Platform, safe_name, validate_names
+from .core.platform import Platform, is_profile_dir, safe_name, same_path, validate_names
 from .core.setup import ClaudeSetup, SetupConfig
 
 BG = "#0f1115"
@@ -47,6 +48,21 @@ class _Tooltip:
         if self.tip:
             self.tip.destroy()
             self.tip = None
+
+
+def _last_used(path: str) -> str:
+    """'today', 'yesterday' or '23 Sep' from the folder's newest activity."""
+    for f in Platform().profile_folders():
+        if same_path(f.path, path):
+            t = f.last_used
+            break
+    else:
+        try:
+            t = os.path.getmtime(path)
+        except OSError:
+            return "unknown"
+    days = (time.time() - t) / 86400
+    return "today" if days < 1 else "yesterday" if days < 2 else time.strftime("%d %b", time.localtime(t))
 
 
 def _swatch(parent, color: str, command, width: int = 4, height: int = 1) -> tk.Label:
@@ -292,14 +308,18 @@ class SetupWizard(tk.Tk):
         """Current (or initial) name/color/badge for each row."""
         if getattr(self, "rows", None):
             return [{"name": r["name"].get(), "color": r["color"], "badge": r["badge"].get(),
-                     "badge_custom": r["badge_custom"], "startup": r["startup"].get()} for r in self.rows]
+                     "badge_custom": r["badge_custom"], "startup": r["startup"].get(),
+                     "profile_dir": r["profile_dir"], "orig_name": r["orig_name"]} for r in self.rows]
         states = []
         for i, name in enumerate(getattr(self, "existing_names", [])):
             st = self.saved_styles.get(name, {})
             states.append({"name": name, "color": st.get("color") or icons.default_color(i),
                            "badge": st.get("badge", icons.default_badge(name)),
                            "badge_custom": "badge" in st,
-                           "startup": startup.is_enabled(name, self.app.platform)})
+                           "startup": startup.is_enabled(name, self.app.platform),
+                           # pinned, so renaming an existing instance keeps its data
+                           "profile_dir": st.get("profile_dir") or self.app.platform.profile_dir(safe_name(name)),
+                           "orig_name": name})
         return states
 
     def _rebuild_names(self) -> None:
@@ -316,7 +336,8 @@ class SetupWizard(tk.Tk):
             name = f"Instance {k}"
             used.add(name.lower())
             states.append({"name": name, "color": icons.default_color(len(states)),
-                           "badge": icons.default_badge(name), "badge_custom": False, "startup": False})
+                           "badge": icons.default_badge(name), "badge_custom": False, "startup": False,
+                           "profile_dir": None, "orig_name": None})
         for i, st in enumerate(states[:n]):
             self._add_row(i, st)
         self._sync_all_startup()
@@ -353,12 +374,26 @@ class SetupWizard(tk.Tk):
                        activebackground=PANEL, command=self._sync_all_startup).pack(side="left", padx=(38, 0))
         state["startup"] = startup_var
 
+        info = tk.Frame(self.name_frame, bg=PANEL)
+        info.pack(fill="x", pady=(0, 6))
+        tk.Label(info, text="", bg=PANEL, width=11).pack(side="left")
+        status = tk.Label(info, text="", bg=PANEL, fg=MUTED, anchor="w", font=("Segoe UI", 8))
+        status.pack(side="left")
+        link = tk.Label(info, text="Profile…", bg=PANEL, fg=ACCENT, cursor="hand2",
+                        font=("Segoe UI", 8, "underline"))
+        link.pack(side="left", padx=(10, 0))
+        link.bind("<Button-1>", lambda _e: self._pick_profile(state))
+        state["status"] = status
+        state["profile_dir"] = st.get("profile_dir")
+        state["orig_name"] = st.get("orig_name")
+
         def on_name(*_):
             if not state["badge_custom"]:
                 state["_sync"] = True
                 badge_var.set(icons.default_badge(name_var.get()))
                 state["_sync"] = False
             self._refresh_preview(state)
+            self._refresh_status(state)
 
         def on_badge(*_):
             if len(badge_var.get()) > 2:
@@ -372,6 +407,7 @@ class SetupWizard(tk.Tk):
         badge_var.trace_add("write", on_badge)
         self.rows.append(state)
         self._refresh_preview(state)
+        self._refresh_status(state)
 
     def _refresh_preview(self, state: dict) -> None:
         state["swatch"].configure(bg=state["color"])
@@ -383,6 +419,95 @@ class SetupWizard(tk.Tk):
         img = icons.render(state["color"], state["badge"].get(), 36, self._icon_source())
         state["photo"] = ImageTk.PhotoImage(img)  # keep a reference
         state["preview"].configure(image=state["photo"])
+
+    # ------------------------------------------------------------ profiles -- #
+
+    def _resolved_profile(self, state: dict) -> str:
+        return state["profile_dir"] or self.app.platform.profile_dir(safe_name(state["name"].get()))
+
+    def _refresh_status(self, state: dict) -> None:
+        path = self._resolved_profile(state)
+        folder = os.path.basename(path)
+        if any(same_path(path, m) for m in self.app.platform.main_profiles()):
+            text, color = f"⚠ {folder} is your main Claude's folder — pick another", BAD
+        elif os.path.isdir(path) and is_profile_dir(path):
+            text, color = f"↳ Continues existing profile {folder} (last used {_last_used(path)})", GOOD
+        else:
+            text, color = f"↳ New profile {folder} — starts fresh", MUTED
+        if state.get("orig_name") and state["orig_name"].lower() != state["name"].get().strip().lower():
+            text += f"   (renamed from {state['orig_name']}, data kept)"
+        state["status"].configure(text=text, fg=color)
+
+    def _pick_profile(self, state: dict) -> None:
+        """Choose which folder an instance uses: a new one, or any existing
+        Claude folder so it continues where that Claude left off."""
+        from tkinter import filedialog
+
+        p = self.app.platform
+        pop = tk.Toplevel(self)
+        pop.title("Profile folder")
+        pop.configure(bg=PANEL)
+        pop.transient(self)
+        pop.resizable(False, False)
+        name = state["name"].get().strip() or "this instance"
+        tk.Label(pop, text=f"Which data should “{name}” use?", bg=PANEL, fg=TEXT,
+                 font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=14, pady=(12, 2))
+        tk.Label(pop, text="Pick an existing folder to continue with its sign-in, chats and sessions,\n"
+                           "or a new folder to start fresh. Folders are never copied or changed.",
+                 bg=PANEL, fg=MUTED, justify="left").pack(anchor="w", padx=14, pady=(0, 8))
+
+        choice = tk.StringVar(value=self._resolved_profile(state))
+        used = {os.path.normcase(self._resolved_profile(r)) for r in self.rows if r is not state}
+        default = p.profile_dir(safe_name(name))
+
+        def option(text: str, value: str, enabled: bool = True, note: str = "") -> None:
+            fr = tk.Frame(pop, bg=PANEL)
+            fr.pack(fill="x", padx=14, pady=1)
+            tk.Radiobutton(fr, text=text, variable=choice, value=value, bg=PANEL, fg=TEXT,
+                           selectcolor="#12161d", activebackground=PANEL, activeforeground=TEXT,
+                           disabledforeground="#566070", anchor="w",
+                           state="normal" if enabled else "disabled").pack(side="left")
+            if note:
+                tk.Label(fr, text=note, bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(side="left", padx=6)
+
+        folders = p.profile_folders()
+        if not any(same_path(f.path, default) for f in folders):
+            option(f"New folder {os.path.basename(default)} — starts fresh", default)
+        mains = [f for f in folders if f.is_main][:1]  # newest main location only
+        for f in [f for f in folders if not f.is_main] + mains:
+            taken = os.path.normcase(f.path) in used
+            note = ("used by your main Claude app" if f.is_main else
+                    "used by another instance" if taken else f"last used {_last_used(f.path)}")
+            option(f.label, f.path, enabled=not (f.is_main or taken), note=note)
+
+        def browse() -> None:
+            d = filedialog.askdirectory(parent=pop, title="Choose a Claude profile folder")
+            if d:
+                d = os.path.normpath(d)
+                if not is_profile_dir(d) and not messagebox.askyesno(
+                        "Profile folder", "This folder has no Claude data yet, so the instance will "
+                                          "start fresh there. Use it anyway?", parent=pop):
+                    return
+                choice.set(d)
+                option(os.path.basename(d) + " (chosen)", d)
+
+        bar = tk.Frame(pop, bg=PANEL)
+        bar.pack(fill="x", padx=14, pady=12)
+        ttk.Button(bar, text="Browse…", style="Ghost.TButton", command=browse).pack(side="left")
+
+        def ok() -> None:
+            value = choice.get()
+            if any(same_path(value, m) for m in p.main_profiles()):
+                messagebox.showerror("Profile folder", "That folder belongs to your main Claude. "
+                                     "Two Claudes cannot use one folder at the same time.", parent=pop)
+                return
+            state["profile_dir"] = value
+            self._refresh_status(state)
+            pop.destroy()
+
+        ttk.Button(bar, text="Use this folder", command=ok).pack(side="right")
+        ttk.Button(bar, text="Cancel", style="Ghost.TButton", command=pop.destroy).pack(side="right", padx=8)
+        pop.grab_set()
 
     def _icon_source(self) -> str | None:
         inst = self.installs[0] if self.installs else None
@@ -424,10 +549,19 @@ class SetupWizard(tk.Tk):
         if problems:
             messagebox.showerror("Check the instance names", "\n".join(problems))
             return
+        from .core.launcher import Instance
+
+        folders = [self._resolved_profile(r) for r in self.rows]
+        problems = self.app.profile_problems([Instance(n, f) for n, f in zip(names, folders)])
+        if problems:
+            messagebox.showerror("Check the profile folders", "\n\n".join(problems))
+            return
         self.names = names
         self.styles = {r["name"].get().strip(): {"color": r["color"], "badge": r["badge"].get().strip(),
-                                                 "startup": r["startup"].get()}
-                       for r in self.rows}
+                                                 "startup": r["startup"].get(), "profile_dir": f}
+                       for r, f in zip(self.rows, folders)}
+        self.renames = {r["orig_name"]: r["name"].get().strip() for r in self.rows
+                        if r["orig_name"] and r["orig_name"].lower() != r["name"].get().strip().lower()}
         self._show_review()
 
     def _toggle_all_startup(self) -> None:
@@ -527,8 +661,13 @@ class SetupWizard(tk.Tk):
                 tk.Label(r, image=photo, bg=PANEL).pack(side="left", padx=(0, 8))
             tk.Label(r, text=n, bg=PANEL, fg=TEXT, width=20, anchor="w",
                      font=("Segoe UI", 10, "bold")).pack(side="left")
-            tk.Label(r, text=p.profile_dir(safe_name(n)), bg=PANEL, fg=MUTED, anchor="w",
+            folder = st.get("profile_dir") or p.profile_dir(safe_name(n))
+            tk.Label(r, text=folder, bg=PANEL, fg=MUTED, anchor="w",
                      font=("Cascadia Mono", 9)).pack(side="left")
+            if os.path.isdir(folder) and is_profile_dir(folder):
+                self._badge(r, "continues", "#1f3b2a", fg=GOOD).pack(side="left", padx=8)
+            else:
+                self._badge(r, "new", "#2a2f3a", fg=MUTED).pack(side="left", padx=8)
             if st.get("startup"):
                 self._badge(r, "starts at sign-in", "#3b4a63", fg=TEXT).pack(side="right", padx=8)
 
@@ -662,6 +801,7 @@ class SetupWizard(tk.Tk):
 
     def _run_setup(self) -> None:
         cfg = SetupConfig(instance_names=self.names, make_shortcuts=True, styles=self.styles,
+                          renames=getattr(self, "renames", {}),
                           update_check=bool(getattr(self, "update_var", None) and self.update_var.get()))
 
         def task(log):

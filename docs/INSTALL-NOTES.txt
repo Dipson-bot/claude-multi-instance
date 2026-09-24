@@ -1,5 +1,5 @@
 ==========================================================
-Claude Multi-Instance Setup  v1.3
+Claude Multi-Instance Setup  v1.4
       Run multiple Claude Desktop profiles on one machine
 ==========================================================
 
@@ -16,6 +16,12 @@ QUICK START
 
 TIP: If you already set up instances before, the wizard detects them,
 pre-fills names/colors, and refreshes them without touching your profiles.
+
+CONTINUE AN EXISTING CLAUDE: under each instance the wizard shows
+"Continues existing profile ..." (keeps sign-in, chats, sessions) or
+"New profile ... starts fresh". Click  Profile...  to pick another
+existing folder. Renaming an instance keeps its data. Your main Claude
+(normal Claude icon) is never changed.
 
 REQUIREMENTS
 ------------

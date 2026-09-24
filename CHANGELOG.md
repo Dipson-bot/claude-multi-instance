@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.4 (2026-09-24)
+
+### New
+- **Continue an existing Claude**: each instance shows whether it continues an
+  existing profile (with its sign-in, local chats and sessions) or starts fresh.
+  **Profile…** lets you pick any existing Claude folder, or browse for one.
+- **Renaming keeps data**: a renamed instance keeps its profile folder, and the
+  old name's shortcuts and startup entry are cleaned up. Previously a new name
+  meant a new, empty folder.
+
+### Fixed
+- The Microsoft Store Claude keeps its data inside its package folder
+  (`…\Packages\Claude_…\LocalCache\Roaming\Claude`). The tool now
+  recognizes it as your main Claude's folder and never assigns it to an instance.
+- Two instances can no longer be set to the same folder.
+
 ## v1.3 (2026-09-24)
 
 ### macOS
