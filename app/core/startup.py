@@ -12,7 +12,8 @@ import os
 import plistlib
 from typing import Callable
 
-from .launcher import Instance, LauncherBuilder, mac_app_path, mac_bundle_id, windows_args
+from .launcher import (Instance, LauncherBuilder, instance_aumid, mac_app_path, mac_bundle_id,
+                       windows_args)
 from .platform import Platform, safe_name
 
 LogFn = Callable[[str], None]
@@ -90,7 +91,8 @@ def set_enabled(inst: Instance, enabled: bool, p: Platform | None = None,
         exe = os.path.join(p.root_install_dir(), "app", "Claude.exe")
         if not os.path.isfile(exe):
             raise FileNotFoundError("the patched Claude copy is missing; run setup first")
-        LauncherBuilder()._win_shortcut(path, exe, windows_args(inst), inst.icon or exe)
+        LauncherBuilder()._win_shortcut(path, exe, windows_args(inst), inst.icon or exe,
+                                        instance_aumid(inst.name))
         # re-enabling here must also undo a "Disabled" set in Task Manager
         _win_clear_task_manager_flag(os.path.basename(path))
     elif p.is_macos:

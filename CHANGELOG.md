@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.5 (2026-09-24)
+
+### New
+- **Pinned instances keep their colored icon on the taskbar.** Each shortcut
+  now carries the same taskbar identity (AppUserModelID) as its running
+  window, so a pinned instance and its window share one taskbar button.
+- **Start menu entries**: each instance gets a Start menu shortcut
+  ("Claude Instances" folder), so you can open it by typing its name in
+  Windows search. "Pin to taskbar" on a running instance pins this shortcut,
+  so the pin opens the right instance with its colored icon.
+- **Switch folders between instances**: in **Profile…**, a folder used by
+  another instance can now be chosen; the two instances swap folders.
+  **Start fresh** (a new, empty folder) is always offered, and **Browse…**
+  picks any location.
+
+### Changed
+- Windows now shows each running instance's name and colored icon when you
+  right-click its taskbar button.
+
 ## v1.4 (2026-09-24)
 
 ### New

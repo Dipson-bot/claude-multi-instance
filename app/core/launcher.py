@@ -25,6 +25,41 @@ class Instance:
     startup: bool = False  # start automatically at sign-in
 
 
+_LNK_ID_CS = r"""
+using System; using System.Runtime.InteropServices;
+[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IPropertyStore {
+  int GetCount(out uint c); int GetAt(uint i, out PropKey k);
+  int GetValue(ref PropKey k, out PropVar v); int SetValue(ref PropKey k, ref PropVar v); int Commit(); }
+[StructLayout(LayoutKind.Sequential, Pack = 4)] public struct PropKey { public Guid fmtid; public uint pid; }
+[StructLayout(LayoutKind.Explicit, Size = 24)] public struct PropVar { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; }
+public static class LnkId {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern int SHGetPropertyStoreFromParsingName(string path, IntPtr bc, int flags, ref Guid iid,
+    [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+  static PropKey Key() { return new PropKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 }; }
+  static IPropertyStore Open(string path, int flags) {
+    Guid iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"); IPropertyStore s;
+    Marshal.ThrowExceptionForHR(SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, flags, ref iid, out s)); return s; }
+  public static void Set(string path, string id) {
+    IPropertyStore s = Open(path, 2); PropKey k = Key();
+    PropVar v = new PropVar { vt = 31, p = Marshal.StringToCoTaskMemUni(id) };
+    try { Marshal.ThrowExceptionForHR(s.SetValue(ref k, ref v)); Marshal.ThrowExceptionForHR(s.Commit()); }
+    finally { Marshal.FreeCoTaskMem(v.p); Marshal.ReleaseComObject(s); } }
+  public static string Get(string path) {
+    IPropertyStore s = Open(path, 0); PropKey k = Key(); PropVar v;
+    try { Marshal.ThrowExceptionForHR(s.GetValue(ref k, out v)); return v.vt == 31 ? Marshal.PtrToStringUni(v.p) : ""; }
+    finally { Marshal.ReleaseComObject(s); } } }
+"""
+
+
+def instance_aumid(name: str) -> str:
+    """Taskbar identity (AppUserModelID) of an instance. Must match the launch
+    shim in asar_patch.py, which sets the same ID on the running app, so a
+    pinned shortcut and its window share one taskbar button."""
+    return "Claude.Instance." + "".join(c for c in name if c.isascii() and c.isalnum())
+
+
 def windows_args(inst: Instance) -> str:
     """Command-line arguments for launching an instance from the patched copy."""
     from .asar_patch import INSTANCE_ARG, INSTANCE_ICON_ARG
@@ -76,7 +111,8 @@ class LauncherBuilder:
 
     # ---- Windows ---- #
 
-    def build_windows(self, instances: list[Instance], copy_exe: str, launcher_dir: str, desktop: str) -> None:
+    def build_windows(self, instances: list[Instance], copy_exe: str, launcher_dir: str, desktop: str,
+                      start_menu: str | None = None) -> None:
         """One .lnk per instance: the patched copy + --user-data-dir.
 
         The patched bundle derives CLAUDE_USER_DATA_DIR from --user-data-dir, so
@@ -91,15 +127,25 @@ class LauncherBuilder:
             icon = inst.icon or copy_exe
             launcher = os.path.join(launcher_dir, f"Claude-{inst.name}.lnk")
             shortcut = os.path.join(desktop, f"Claude ({inst.name}).lnk")
-            self._win_shortcut(launcher, copy_exe, args, icon)
-            self._win_shortcut(shortcut, copy_exe, args, icon)
+            aumid = None if inst.is_primary else instance_aumid(inst.name)
+            self._win_shortcut(launcher, copy_exe, args, icon, aumid)
+            self._win_shortcut(shortcut, copy_exe, args, icon, aumid)
+            if start_menu:
+                # Start menu entry: found by Windows search, and the shortcut the
+                # taskbar uses when a running instance is pinned (matching ID)
+                os.makedirs(start_menu, exist_ok=True)
+                self._win_shortcut(os.path.join(start_menu, f"Claude {inst.name}.lnk"),
+                                   copy_exe, args, icon, aumid)
             inst.launcher = launcher
             inst.shortcut = shortcut
             inst.exe_target = copy_exe
             self.log(f"  + launcher {launcher}")
 
-    def _win_shortcut(self, lnk: str, target: str, args: str, icon: str) -> None:
-        """Create/overwrite a .lnk via the WScript.Shell COM object."""
+    def _win_shortcut(self, lnk: str, target: str, args: str, icon: str,
+                      aumid: str | None = None) -> None:
+        """Create/overwrite a .lnk via the WScript.Shell COM object. With aumid,
+        also stamp the shortcut's AppUserModelID so a pinned copy merges with
+        the running instance's taskbar button (and is verified by reading back)."""
         if os.name != "nt":
             return
         import subprocess
@@ -114,8 +160,12 @@ class LauncherBuilder:
             f"$l.Arguments={q(args)};"
             f"$l.WorkingDirectory={q(os.path.dirname(target))};"
             f"$l.IconLocation={q(icon + ',0')};"
-            "$l.Save()"
+            "$l.Save();"
         )
+        if aumid:
+            ps += (f"Add-Type -TypeDefinition {q(_LNK_ID_CS)};"
+                   f"[LnkId]::Set({q(lnk)},{q(aumid)});"
+                   f"Write-Output ('AUMID=' + [LnkId]::Get({q(lnk)}))")
         proc = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True,
@@ -125,6 +175,9 @@ class LauncherBuilder:
         )
         if proc.returncode != 0 or not os.path.isfile(lnk):
             raise RuntimeError(f"Could not create shortcut {lnk}: {proc.stderr.strip()[-500:]}")
+        if aumid and f"AUMID={aumid}" not in proc.stdout:
+            raise RuntimeError(f"Could not set the taskbar identity on {lnk}: "
+                               f"{(proc.stderr or proc.stdout).strip()[-500:]}")
 
     # ---- macOS ---- #
 

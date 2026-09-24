@@ -148,7 +148,7 @@ class ClaudeSetup:
             self._merge_existing(base, instances, res)
             self._make_icons(instances, base, ".ico", installs[0])
             desktop = p.desktop_dir()
-            self.launcher.build_windows(instances, copy_exe, base, desktop)
+            self.launcher.build_windows(instances, copy_exe, base, desktop, p.start_menu_dir())
             self._apply_startup(instances)
             self._apply_renames(cfg)
             self._write_manifest(base, instances, tuple(cfg.renames))

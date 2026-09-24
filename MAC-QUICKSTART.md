@@ -10,7 +10,7 @@ so please note anything odd (screenshots help).
   `brew install python-tk`.)
 
 ## Run it
-1. Unzip `Claude-Multi-Setup-v1.4-macOS.zip` (e.g. into Downloads).
+1. Unzip `Claude-Multi-Setup-v1.5-macOS.zip` (e.g. into Downloads).
 2. Open **Terminal** and run:
    ```bash
    cd ~/Downloads/claude-multi-setup

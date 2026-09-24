@@ -60,7 +60,7 @@ _ENV_DELETE_RX = re.compile(r"delete process\.env\.CLAUDE_USER_DATA_DIR\b")
 INSTANCE_ARG = "--claude-instance"
 INSTANCE_ICON_ARG = "--claude-instance-icon"
 
-_SHIM_MARKER = "/*claude-multi-setup:env-shim*/"
+_SHIM_MARKER = "/*claude-multi-setup:env-shim:v2*/"
 # 1. CLAUDE_USER_DATA_DIR <- --user-data-dir (what the old VBS launchers set)
 # 2. --claude-instance=<name>: own taskbar group (AppUserModelID) and
 #    "<title> — <name>" window titles
@@ -74,9 +74,8 @@ _ENV_SHIM = _SHIM_MARKER + (
     'if(u)process.env.CLAUDE_USER_DATA_DIR=u}'
     'const n=g("claude-instance"),i=g("claude-instance-icon");if(!n&&!i)return;'
     'const E=require("electron"),P=E.app;'
-    'if(n&&process.platform==="win32"){'
-    'const id="Claude.Instance."+n.replace(/[^A-Za-z0-9]/g,""),s=P.setAppUserModelId.bind(P);'
-    'P.setAppUserModelId=()=>s(id);s(id)}'
+    'const W=process.platform==="win32",id=n?"Claude.Instance."+n.replace(/[^A-Za-z0-9]/g,""):null;'
+    'if(n&&W){const s=P.setAppUserModelId.bind(P);P.setAppUserModelId=()=>s(id);s(id)}'
     # Titles change three ways: Claude calls win.setTitle() itself (wrapped
     # below), Electron applies the page <title> (page-title-updated listener),
     # and Electron resets it natively right after the window is created
@@ -89,6 +88,13 @@ _ENV_SHIM = _SHIM_MARKER + (
     'const img=i?E.nativeImage.createFromPath(i):null;'
     'P.on("browser-window-created",(e,w)=>{try{'
     'if(img&&!img.isEmpty())w.setIcon(img);'
+    # Tell the taskbar who this window is: its ID (so it merges with the
+    # pinned shortcut) and how to relaunch it, so "Pin to taskbar" on a running
+    # instance pins this instance - not bare Claude on the wrong profile.
+    'if(n&&W&&w.setAppDetails){const q=x=>"\\""+x+"\\"",R=A.filter(x=>/^--(user-data-dir|claude-instance|claude-instance-icon)=/.test(x))'
+    '.map(x=>{const j=x.indexOf("=");return x.slice(0,j+1)+q(x.slice(j+1).replace(/^"|"$/g,""))});'
+    'w.setAppDetails({appId:id,appIconPath:i||process.execPath,appIconIndex:0,'
+    'relaunchCommand:[q(process.execPath)].concat(R).join(" "),relaunchDisplayName:"Claude "+n})}'
     'if(n){w.on("page-title-updated",(ev,t)=>{ev.preventDefault();w.setTitle(t)});'
     'const fix=()=>{try{if(!w.isDestroyed()&&!w.getTitle().endsWith(S))w.setTitle(w.getTitle())}catch(e){}};'
     'fix();setTimeout(fix,0);w.on("show",fix);w.on("focus",fix);'

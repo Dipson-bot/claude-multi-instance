@@ -20,8 +20,8 @@ Get the latest version from **[Releases](https://github.com/Dipson-bot/claude-mu
 
 | System | File | How to start |
 |---|---|---|
-| Windows 10/11 | `Claude-Multi-Setup-v1.4-Windows.zip` | Unzip, double-click `Claude-Multi-Setup.exe` |
-| macOS | `Claude-Multi-Setup-v1.4-macOS.zip` | Unzip, run `bash start-mac.sh` in Terminal ([guide](MAC-QUICKSTART.md)) |
+| Windows 10/11 | `Claude-Multi-Setup-v1.5-Windows.zip` | Unzip, double-click `Claude-Multi-Setup.exe` |
+| macOS | `Claude-Multi-Setup-v1.5-macOS.zip` | Unzip, run `bash start-mac.sh` in Terminal ([guide](MAC-QUICKSTART.md)) |
 
 Windows may say *"Windows protected your PC"* because the exe is not code-signed
 yet: click **More info → Run anyway**.
@@ -34,7 +34,8 @@ yet: click **More info → Run anyway**.
   - Windows: on the desktop shortcut, the taskbar button and the window.
   - macOS: on the instance's app (Spotlight, Launchpad, Dock).
 - **Instance name in the window title** (Windows): `Claude — Work`.
-- **Separate taskbar buttons** per instance (Windows).
+- **Separate taskbar buttons** per instance (Windows); pinned instances keep their colored icon.
+- **Start menu entries** (Windows): open an instance by typing its name in Windows search.
 - **Open by name on macOS**: each instance is its own app (`Claude Work.app`), found with Spotlight.
 - **Start at sign-in**, per instance or all at once; shows up in Task Manager → Startup apps.
 - **Update reminder** (Windows): after Claude updates, you're asked at sign-in whether to update your instances.
@@ -88,9 +89,11 @@ the setup window shows which folder it uses:
   and settings, exactly where you left off.
 - **"New profile … starts fresh"**: an empty folder; sign in as new.
 
-Click **Profile…** to choose a different folder, such as an older instance's
-folder or any Claude folder via **Browse…**. Folders are never copied or
-changed. Renaming an instance keeps its folder and data.
+Click **Profile…** to choose a different folder: another existing Claude
+folder, **Start fresh** (a new, empty folder), or any location via
+**Browse…**. Choosing a folder another instance uses **swaps** the two
+instances' folders. Folders are never copied or changed. Renaming an
+instance keeps its folder and data.
 
 ![Profile picker](docs/screenshots/profile-picker.png)
 
@@ -155,7 +158,7 @@ Requires Python 3.10+ with Tkinter.
 pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File build\build_windows.ps1   # Windows → dist\Claude-Multi-Setup.exe
 bash build/build_macos.sh                                          # macOS  → dist/Claude Multi Setup.app
-python build/package_release.py v1.4                               # release zips → release/
+python build/package_release.py v1.5                               # release zips → release/
 ```
 Or run directly: `python run.py`.
 

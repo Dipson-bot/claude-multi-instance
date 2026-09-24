@@ -1,5 +1,5 @@
 ==========================================================
-Claude Multi-Instance Setup  v1.4
+Claude Multi-Instance Setup  v1.5
       Run multiple Claude Desktop profiles on one machine
 ==========================================================
 

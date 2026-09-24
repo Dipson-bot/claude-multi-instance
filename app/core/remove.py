@@ -81,6 +81,7 @@ def _instance_files(p: Platform, base: str, name: str) -> list[str]:
         os.path.join(base, f"Claude-{name}.vbs"),  # older versions
         os.path.join(base, f"Claude-{name}.ico"),  # older versions
         os.path.join(desktop, f"Claude ({name}).lnk"),
+        *([os.path.join(p.start_menu_dir(), f"Claude {name}.lnk")] if p.is_windows else []),
         os.path.join(desktop, f"Claude-{name}.command"),  # older versions
         os.path.join(desktop, f"Claude {name}"),  # macOS: Desktop shortcut to the app
         mac_app_path(p.home, name),  # macOS: ~/Applications/Claude <name>.app
@@ -108,6 +109,11 @@ def remove_launchers(name: str, p: Platform | None = None, log: LogFn | None = N
             log(f"  deleted {f}")
         except OSError as exc:
             problems.append(f"{f}: {exc}")
+    if p.is_windows:
+        try:
+            os.rmdir(p.start_menu_dir())  # only when empty
+        except OSError:
+            pass
     try:
         startup.set_enabled(Instance(name, ""), False, p, log)
     except OSError as exc:
@@ -240,6 +246,11 @@ def remove_instances(names: list[str], delete_data: bool = False, uninstall: boo
         removed.append(inst.name)
 
     _rewrite_manifest(p, base, {i.name.lower() for i in targets})
+    if p.is_windows:
+        try:
+            os.rmdir(p.start_menu_dir())  # the "Claude Instances" folder, once empty
+        except OSError:
+            pass
 
     if uninstall:
         log("Removing the shared Claude copy and the update reminder...")
@@ -265,6 +276,11 @@ def remove_instances(names: list[str], delete_data: bool = False, uninstall: boo
                 log(f"  deleted {path}")
             except OSError as exc:
                 problems.append(f"{path}: {exc}")
+        if p.is_windows:
+            try:
+                os.rmdir(p.start_menu_dir())  # only if empty
+            except OSError:
+                pass
         try:
             os.rmdir(base)  # only if nothing else is left in it
             log(f"  deleted {base}")

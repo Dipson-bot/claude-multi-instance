@@ -457,8 +457,15 @@ class SetupWizard(tk.Tk):
                  bg=PANEL, fg=MUTED, justify="left").pack(anchor="w", padx=14, pady=(0, 8))
 
         choice = tk.StringVar(value=self._resolved_profile(state))
-        used = {os.path.normcase(self._resolved_profile(r)) for r in self.rows if r is not state}
-        default = p.profile_dir(safe_name(name))
+        # folder -> the other row using it (choosing it swaps the two folders)
+        used = {os.path.normcase(self._resolved_profile(r)): r for r in self.rows if r is not state}
+        current = self._resolved_profile(state)
+        # a brand-new folder: named after the instance, numbered if that exists
+        fresh = p.profile_dir(safe_name(name))
+        k = 2
+        while (os.path.isdir(fresh) and os.listdir(fresh)) or os.path.normcase(fresh) in used:
+            fresh = p.profile_dir(f"{safe_name(name)}-{k}")
+            k += 1
 
         def option(text: str, value: str, enabled: bool = True, note: str = "") -> None:
             fr = tk.Frame(pop, bg=PANEL)
@@ -471,14 +478,23 @@ class SetupWizard(tk.Tk):
                 tk.Label(fr, text=note, bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(side="left", padx=6)
 
         folders = p.profile_folders()
-        if not any(same_path(f.path, default) for f in folders):
-            option(f"New folder {os.path.basename(default)} — starts fresh", default)
+        if not same_path(fresh, current):
+            option(f"Start fresh: new folder {os.path.basename(fresh)}", fresh)
+        listed = [f for f in folders if not f.is_main]
+        if not any(same_path(f.path, current) for f in folders):
+            option(f"{os.path.basename(current)} (current, no data yet)", current)
         mains = [f for f in folders if f.is_main][:1]  # newest main location only
-        for f in [f for f in folders if not f.is_main] + mains:
-            taken = os.path.normcase(f.path) in used
-            note = ("used by your main Claude app" if f.is_main else
-                    "used by another instance" if taken else f"last used {_last_used(f.path)}")
-            option(f.label, f.path, enabled=not (f.is_main or taken), note=note)
+        for f in listed + mains:
+            other = used.get(os.path.normcase(f.path))
+            if f.is_main:
+                note = "used by your main Claude app"
+            elif same_path(f.path, current):
+                note = f"current · last used {_last_used(f.path)}"
+            elif other is not None:
+                note = f"used by “{other['name'].get().strip()}” — the two will swap folders"
+            else:
+                note = f"last used {_last_used(f.path)}"
+            option(f.label, f.path, enabled=not f.is_main, note=note)
 
         def browse() -> None:
             d = filedialog.askdirectory(parent=pop, title="Choose a Claude profile folder")
@@ -501,6 +517,10 @@ class SetupWizard(tk.Tk):
                 messagebox.showerror("Profile folder", "That folder belongs to your main Claude. "
                                      "Two Claudes cannot use one folder at the same time.", parent=pop)
                 return
+            other = used.get(os.path.normcase(value))
+            if other is not None:  # swap: the other instance takes this one's folder
+                other["profile_dir"] = current
+                self._refresh_status(other)
             state["profile_dir"] = value
             self._refresh_status(state)
             pop.destroy()

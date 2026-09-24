@@ -369,6 +369,22 @@ class Platform:
             return os.path.join(os.environ.get("USERPROFILE", self.home), "Desktop")
         return os.path.join(self.home, "Desktop")
 
+    def start_menu_dir(self) -> str:
+        """Start menu folder for instance shortcuts (Windows): searchable by name,
+        and what the taskbar pins when a running instance is pinned."""
+        base = ""
+        try:
+            import ctypes
+
+            buf = ctypes.create_unicode_buffer(260)
+            # CSIDL_PROGRAMS = 0x02 (the user's Start Menu\Programs)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x02, None, 0, buf) == 0:
+                base = buf.value
+        except Exception:
+            pass
+        base = base or os.path.join(self.roaming_data_root, "Microsoft", "Windows", "Start Menu", "Programs")
+        return os.path.join(base, "Claude Instances")
+
     def load_manifest(self) -> list[dict]:
         """Instances recorded by the last setup: [{name, profile_dir, color, badge, ...}]."""
         try:
